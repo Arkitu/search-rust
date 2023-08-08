@@ -7,10 +7,4 @@ impl<T: ToString> From<T> for Error {
     }
 }
 
-impl<T: ToString> From<Vec<T>> for Vec<Error> {
-    fn from(value: Vec<T>) -> Self {
-        value.into_iter().map(|e| Error::from(e)).collect()
-    }
-}
-
 pub type Result<T> = std::result::Result<T, Error>;
