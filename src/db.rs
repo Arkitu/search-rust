@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use rusqlite::params;
 use tokio_rusqlite::Connection;
 use crate::error::Result;
 
@@ -25,7 +26,8 @@ impl<'a> DB {
         self.conn.call(|conn| {
             conn.execute("
                 CREATE TABLE IF NOT EXISTS elements (
-                    path TEXT PRIMARY KEY
+                    path TEXT PRIMARY KEY,
+                    is_dir BOOLEAN NOT NULL DEFAULT FALSE
                 );
             ", [])?;
             conn.execute("
@@ -61,11 +63,11 @@ impl<'a> DB {
         Ok(())
     }
 
-    pub async fn insert_element(&'a self, path: String) -> Result<()> {
-        self.execute(
-            "INSERT INTO elements (path) VALUES (?1)",
-            [path]
-        ).await?;
+    pub async fn insert_element(&'a self, path: String, is_dir: bool) -> Result<()> {
+        self.conn.clone().call(move |conn|{
+            conn.execute("INSERT INTO elements (path, is_dir) VALUES (?1, ?2)", params![path, is_dir])
+        }).await?;
+
         Ok(())
     }
 }
