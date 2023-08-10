@@ -30,18 +30,18 @@ async fn main() -> Result<()> {
         }
     }
 
-    let db = DB::new(db_path).await?;
-    let mut futures = Vec::new();
-    if let Err(e) = ScanDir::all().walk(target_path, |iter| {
-        for (entry, _) in iter {
-            let is_dir = entry.file_type().expect("cannot determine file type").is_dir();
-            let path = entry.path().to_str().unwrap().to_owned();
-            futures.push(db.insert_element(path, is_dir));
-        }
-    }) {
-        //return Err(Error::from(e[0].to_string()));
-    };
-    join_all(futures).await;
+    // let db = DB::new(db_path).await?;
+    // let mut futures = Vec::new();
+    // if let Err(e) = ScanDir::all().walk(target_path, |iter| {
+    //     for (entry, _) in iter {
+    //         let is_dir = entry.file_type().expect("cannot determine file type").is_dir();
+    //         let path = entry.path().to_str().unwrap().to_owned();
+    //         futures.push(db.insert_element(path, is_dir));
+    //     }
+    // }) {
+    //     //return Err(Error::from(e[0].to_string()));
+    // };
+    // join_all(futures).await;
 
     let mut ui = UI::new();
     ui.run()?;
