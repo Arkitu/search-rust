@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
     };
     join_all(futures).await;
 
-    let ui = UI::new();
+    let mut ui = UI::new();
+    ui.run()?;
 
     Ok(())
 }
