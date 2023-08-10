@@ -4,8 +4,7 @@ use crate::error::Result;
 
 enum UIState {
     None,
-    Tapping,
-    Selecting,
+    Searching,
     Quitting
 }
 
@@ -19,7 +18,7 @@ impl UI {
     pub fn new() -> Self {
         Self {
             input: String::new(),
-            cursor: [0, 0],
+            cursor: [2, 0],
             state: UIState::None
         }
     }
@@ -36,7 +35,7 @@ impl UI {
                 return Ok(());
             },
             UserAction::NewChar(c) => {
-                self.input.insert(self.cursor[0], c);
+                self.input.insert(self.cursor[0]-2, c);
                 self.cursor[0] += 1;
             },
             UserAction::Move(direction) => {
@@ -45,15 +44,15 @@ impl UI {
                         self.cursor[1] -= 1
                     },
                     Direction::Down => self.cursor[1] += 1,
-                    Direction::Left => if self.cursor[0] != 0 {
+                    Direction::Left => if self.cursor[0] > 2 {
                         self.cursor[0] -= 1
                     },
                     Direction::Right => self.cursor[0] += 1
                 }
             },
             UserAction::DeleteChar => {
-                if self.input.len() > 0 {
-                    self.input.remove(self.cursor[0] - 1);
+                if self.cursor[0] > 2 {
+                    self.input.remove(self.cursor[0] - 3);
                     self.cursor[0] -= 1;
                 }
             },
@@ -61,20 +60,23 @@ impl UI {
         }
 
         // Check if cursor is out of bounds
-        if self.cursor[0] >= self.input.len() {
-            self.cursor[0] = self.input.len();
+        if self.cursor[0] >= (self.input.len()+2) {
+            self.cursor[0] = self.input.len()+2;
         }
         if self.cursor[1] > 0 {
             self.cursor[1] = 0;
         }
 
-        Writer::write(&self.input, self.cursor)?;
+        let output_text = format!("[ {} ]", self.input);
+
+        Writer::write(&output_text, self.cursor)?;
 
         Ok(())
     }
 
     pub fn run(&mut self) -> Result<()> {
         Self::init()?;
+        self.state = UIState::Searching;
         loop {
             self.render()?;
             if let UIState::Quitting = self.state {
