@@ -1,6 +1,7 @@
-use std::{io::stdout, time::Duration};
+use std::{io::stdout, time::Duration, result};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style};
 use crate::error::Result;
+use crate::rank::get_results;
 
 enum UIState {
     None,
@@ -67,7 +68,15 @@ impl UI {
             self.cursor[1] = 0;
         }
 
-        let output_text = format!("[ {} ]", self.input);
+        let result_count = terminal::size()?.1 as usize - 2;
+
+        let results = get_results(&self.input, result_count)?;
+
+        let mut output_text = format!("[ {} ]\r\n", self.input);
+
+        for result in results {
+            output_text.push_str(&format!("\r\n > {}", result));
+        }
 
         Writer::write(&output_text, self.cursor)?;
 

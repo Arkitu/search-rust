@@ -1,15 +1,13 @@
 use std::env::args as argv;
-use futures::future::join_all;
-use scan_dir::ScanDir;
 mod db;
 mod error;
 mod ui;
+mod rank;
 use error::Result;
 use db::DB;
 use ui::UI;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let mut db_path = None;
     let mut target_path = ".";
 

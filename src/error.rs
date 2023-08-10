@@ -1,12 +1,12 @@
 #[derive(Debug)]
 pub enum Error {
-    TokioRusqlite(tokio_rusqlite::Error),
+    Rusqlite(rusqlite::Error),
     Io(std::io::Error)
 }
 
-impl From<tokio_rusqlite::Error> for Error {
-    fn from(value: tokio_rusqlite::Error) -> Self {
-        Self::TokioRusqlite(value)
+impl From<rusqlite::Error> for Error {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Rusqlite(value)
     }
 }
 
