@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap};
+use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap, ffi::OsString};
 use crate::error::Result;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,35 +30,38 @@ fn get_results_hashmap(input: &str, result_count: usize) -> Result<HashMap<PathB
 
     let input = input.trim();
 
+    // If input is empty, return empty results
+    if input.is_empty() {
+        return Ok(results);
+    }
+
     let path = PathBuf::from(input);
 
     // If exact path exists, add it to results
     if path.try_exists()? {
-        results.insert(path.clone(), ((&path).into(), 0.));
+        results.insert(path.clone().canonicalize()?, ((&path).into(), 0.));
 
         // If input is a directory, add all its children to results
         if path.is_dir() {
             for entry in read_dir(input)? {
                 let entry = entry?;
                 let path = entry.path();
-                results.insert(path.clone(), ((&path).into(), 2.));
+                results.insert(path.clone().canonicalize()?, ((&path).into(), 2.));
             }
         }
     }
 
     // Check if there are paths that starts with input
-    if let Some(dirname) = path.parent() {
-        let dirname = if dirname.to_str().unwrap().is_empty() {
-            Path::new("./")
-        } else {
-            dirname
-        };
+    if let Some(mut dirname) = path.parent() {
+        if path.is_relative() && dirname.to_str().is_some() && dirname.to_str().unwrap().is_empty() {
+            dirname = Path::new(".");
+        }
         if dirname.try_exists()? {
             for entry in read_dir(dirname)? {
                 let entry = entry?;
-                let path = entry.path();
-                if path.to_str().unwrap().starts_with(input) {
-                    results.insert(path.clone(), ((&path).into(), 1.));
+                let entry_path = entry.path();
+                if entry_path.file_name().unwrap().to_str().unwrap().starts_with(path.file_name().unwrap_or_default().to_str().unwrap()) {
+                    results.insert(entry_path.clone().canonicalize()?, ((&entry_path).into(), 1.));
                 }
             }
         }
