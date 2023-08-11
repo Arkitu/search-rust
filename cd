@@ -1,0 +1,1 @@
+cargo run -- --target-file search_rust_temp && set TARGET_PATH "$(cat search_rust_temp)" && rm search_rust_temp && cd $TARGET_PATH

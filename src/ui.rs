@@ -1,6 +1,6 @@
-use std::{io::stdout, time::Duration};
+use std::{io::stdout, time::Duration, path::PathBuf};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style::{Print, Stylize}};
-use crate::{error::Result, rank::ResultType};
+use crate::{error::Result, rank::RankResult};
 use crate::rank::get_results;
 pub mod visual_pack;
 use visual_pack::{VisualPack, VisualPackChars};
@@ -13,16 +13,20 @@ enum UIState {
 
 pub struct UI {
     input: String,
+    display_input: String,
+    output: Option<PathBuf>,
     cursor: [usize; 2],
     state: UIState,
     vp: VisualPack,
-    results: Vec<(ResultType, String)>
+    results: Vec<RankResult>
 }
 
 impl UI {
     pub fn new(visual_pack: VisualPack) -> Self {
         Self {
             input: String::new(),
+            display_input: String::new(),
+            output: None,
             cursor: [visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count(), 0],
             state: UIState::None,
             vp: visual_pack,
@@ -34,7 +38,7 @@ impl UI {
         Self::new(VisualPack::ExtendedUnicode)
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self) -> Result<Option<PathBuf>> {
         self.init()?;
         self.state = UIState::Searching;
         loop {
@@ -44,7 +48,7 @@ impl UI {
                 break;
             }
         }
-        Ok(())
+        Ok(self.output.clone())
     }
 
     fn init(&self) -> Result<()> {
@@ -63,6 +67,7 @@ impl UI {
             UserAction::NewChar(c) => {
                 self.input.insert(self.cursor[0]-input_offset, c);
                 self.cursor[0] += 1;
+                self.cursor[1] = 0;
             },
             UserAction::Move(direction) => {
                 match direction {
@@ -71,9 +76,17 @@ impl UI {
                     },
                     Direction::Down => self.cursor[1] += 1,
                     Direction::Left => if self.cursor[0] > input_offset {
-                        self.cursor[0] -= 1
+                            self.cursor[0] -= 1
                     },
-                    Direction::Right => self.cursor[0] += 1
+                    Direction::Right => {
+                        if self.cursor[1] != 0 {
+                            self.input = self.display_input.clone();
+                            self.cursor[0] = self.input.len()+input_offset;
+                            self.cursor[1] = 0;
+                        } else {
+                            self.cursor[0] += 1
+                        }
+                    }
                 }
             },
             UserAction::DeleteChar => {
@@ -81,15 +94,28 @@ impl UI {
                     self.input.remove(self.cursor[0] - 1 - input_offset);
                     self.cursor[0] -= 1;
                 }
+                self.cursor[1] = 0;
             },
-            UserAction::Tab => {
+            UserAction::NextResult => {
                 self.cursor[1] += 1;
                 if self.cursor[1] > self.results.len() {
                     self.cursor[1] = 1;
                 }
+            },
+            UserAction::GotoResult => {
+                if self.cursor[1] == 0 {
+                    self.cursor[1] = 1;
+                }
+                self.output = Some(self.results[self.cursor[1]-1].path.clone());
+                self.state = UIState::Quitting;
+                return Ok(());
             }
             UserAction::None => {}
         }
+
+        let result_count = terminal::size()?.1 as usize - 2;
+
+        self.results = get_results(&self.input, result_count)?;
 
         // Check if cursor is out of bounds
         if self.cursor[0] >= (self.input.len()+input_offset) {
@@ -99,15 +125,17 @@ impl UI {
             self.cursor[1] = self.results.len();
         }
 
-        let result_count = terminal::size()?.1 as usize - 2;
+        self.display_input = if self.cursor[1] == 0 {
+            self.input.to_string()
+        } else {
+            self.results[self.cursor[1]-1].path.display().to_string()
+        };
 
-        self.results = get_results(&self.input, result_count)?;
+        let mut output_text = format!("{}{}{}\r\n", self.vp.get_symbol(VisualPackChars::SearchBarLeft), self.display_input, self.vp.get_symbol(VisualPackChars::SearchBarRight));
 
-        let mut output_text = format!("{}{}{}\r\n", self.vp.get_symbol(VisualPackChars::SearchBarLeft), self.input, self.vp.get_symbol(VisualPackChars::SearchBarRight));
-
-        for (i, (result_type, path)) in self.results.iter().enumerate() {
-            let symbol = self.vp.get_symbol((*result_type).into());
-            let mut line = format!("\r\n {} {}", symbol, path);
+        for (i, result) in self.results.iter().enumerate() {
+            let symbol = self.vp.get_symbol(result.result_type.into());
+            let mut line = format!("\r\n {} {}", symbol, result.path.display());
             if self.cursor[1] == (i+1) {
                 line = line.on_white().to_string();
             }
@@ -138,7 +166,8 @@ enum UserAction {
     NewChar(char),
     DeleteChar,
     Move(Direction),
-    Tab,
+    NextResult,
+    GotoResult,
     None
 }
 
@@ -169,11 +198,11 @@ impl Reader {
             KeyEvent { code: KeyCode::Up, .. } => UserAction::Move(Direction::Up),
             KeyEvent { code: KeyCode::Down, .. } => UserAction::Move(Direction::Down),
 
-            KeyEvent { code: KeyCode::Enter, ..} => UserAction::Move(Direction::Down),
+            KeyEvent { code: KeyCode::Enter, ..} => UserAction::GotoResult,
 
             KeyEvent { code: KeyCode::Backspace, .. } => UserAction::DeleteChar,
 
-            KeyEvent { code: KeyCode::Tab, .. } => UserAction::Tab,
+            KeyEvent { code: KeyCode::Tab, .. } => UserAction::NextResult,
             _ => UserAction::None
         })
     }

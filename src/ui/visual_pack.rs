@@ -1,6 +1,6 @@
 use crossterm::cursor;
 
-use crate::rank::ResultType;
+use crate::rank::PathType;
 
 pub enum VisualPackChars {
     ResultTypeDir,
@@ -8,11 +8,11 @@ pub enum VisualPackChars {
     SearchBarLeft,
     SearchBarRight
 }
-impl From<ResultType> for VisualPackChars {
-    fn from(result_type: ResultType) -> Self {
+impl From<PathType> for VisualPackChars {
+    fn from(result_type: PathType) -> Self {
         match result_type {
-            ResultType::Dir => Self::ResultTypeDir,
-            ResultType::File => Self::ResultTypeFile
+            PathType::Dir => Self::ResultTypeDir,
+            PathType::File => Self::ResultTypeFile
         }
     }
 }
