@@ -3,13 +3,16 @@ mod db;
 mod error;
 mod ui;
 mod rank;
+use error::Error;
 use error::Result;
 use db::DB;
 use ui::UI;
+use ui::visual_pack::VisualPack;
 
 fn main() -> Result<()> {
     let mut db_path = None;
     let mut target_path = ".";
+    let mut vp = VisualPack::ExtendedUnicode;
 
     let args: Vec<String> = argv().collect();
     for (i, arg) in argv().enumerate() {
@@ -17,13 +20,37 @@ fn main() -> Result<()> {
             "--db-path" => {
                 if i + 1 < args.len() {
                     db_path = Some(args[i + 1].as_str());
+                } else {
+                    return Err(Error::CliArgs("Bad args : --db_path".to_string()))
                 }
             },
             "--target-path" => {
                 if i + 1 < args.len() {
                     target_path = args[i + 1].as_str();
+                } else {
+                    return Err(Error::CliArgs("Bad args : --target_path".to_string()))
                 }
             },
+            "--style" => {
+                if i + 1 < args.len() {
+                    vp = match args[i + 1].as_str() {
+                        "extended_unicode" => {
+                            VisualPack::ExtendedUnicode
+                        },
+                        "common_unicode" => {
+                            VisualPack::CommonUnicode
+                        },
+                        "ascii" => {
+                            VisualPack::Ascii
+                        },
+                        _ => {
+                            return Err(Error::CliArgs("Bad args : unknown style".to_string()));
+                        }
+                    }
+                } else {
+                    return Err(Error::CliArgs("Bad args : --style".to_string()))
+                }
+            }
             _ => {}
         }
     }
@@ -41,7 +68,7 @@ fn main() -> Result<()> {
     // };
     // join_all(futures).await;
 
-    let mut ui = UI::new();
+    let mut ui = UI::new(vp);
     ui.run()?;
 
     Ok(())

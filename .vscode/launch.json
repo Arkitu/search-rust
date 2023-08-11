@@ -1,0 +1,63 @@
+{
+    // Utilisez IntelliSense pour en savoir plus sur les attributs possibles.
+    // Pointez pour afficher la description des attributs existants.
+    // Pour plus d'informations, visitez : https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'search-rust'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=search-rust",
+                    "--package=search-rust"
+                ],
+                "filter": {
+                    "name": "search-rust",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'search-rust'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=search-rust",
+                    "--package=search-rust"
+                ],
+                "filter": {
+                    "name": "search-rust",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Run 'search-rust'",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=search-rust",
+                    "--package=search-rust"
+                ],
+                "filter": {
+                    "name": "search-rust",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

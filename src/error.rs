@@ -1,7 +1,8 @@
 #[derive(Debug)]
 pub enum Error {
     Rusqlite(rusqlite::Error),
-    Io(std::io::Error)
+    Io(std::io::Error),
+    CliArgs(String)
 }
 
 impl From<rusqlite::Error> for Error {
