@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap, ffi::OsString};
+use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap};
 use crate::error::Result;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,11 +28,11 @@ fn get_results_hashmap(input: &str, result_count: usize) -> Result<HashMap<PathB
     // Lower score is better
     let mut results: HashMap<PathBuf, (PathType, f32)> = HashMap::new();
 
-    let input = input.trim();
+    let mut input = input.trim();
 
     // If input is empty, return empty results
     if input.is_empty() {
-        return Ok(results);
+        input = "."
     }
 
     let path = PathBuf::from(input);

@@ -1,4 +1,4 @@
-use std::{io::stdout, time::Duration, path::PathBuf};
+use std::{io::stdout, time::Duration, path::{PathBuf, Path}};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style::{Print, Stylize}};
 use crate::{error::Result, rank::RankResult};
 use crate::rank::get_results;
@@ -133,9 +133,15 @@ impl UI {
 
         let mut output_text = format!("{}{}{}\r\n", self.vp.get_symbol(VisualPackChars::SearchBarLeft), self.display_input, self.vp.get_symbol(VisualPackChars::SearchBarRight));
 
+        let current_path = Path::new(".").canonicalize()?;
+        let current_path = current_path.to_str().unwrap_or("");
         for (i, result) in self.results.iter().enumerate() {
             let symbol = self.vp.get_symbol(result.result_type.into());
-            let mut line = format!("\r\n {} {}", symbol, result.path.display());
+            let mut path = result.path.display().to_string();
+            if path.starts_with(current_path) {
+                path = path.replacen(current_path, ".", 1);
+            }
+            let mut line = format!("\r\n {} {}", symbol, path);
             if self.cursor[1] == (i+1) {
                 line = line.on_white().to_string();
             }

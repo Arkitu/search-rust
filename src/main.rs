@@ -1,11 +1,11 @@
 use std::env;
-mod db;
+//mod db;
 mod error;
 mod ui;
 mod rank;
 use error::Error;
 use error::Result;
-use db::DB;
+//use db::DB;
 use ui::UI;
 use ui::visual_pack::VisualPack;
 
