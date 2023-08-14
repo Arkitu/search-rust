@@ -68,7 +68,7 @@ fn main() -> Result<()> {
     // };
     // join_all(futures).await;
 
-    let mut ui = UI::new(vp);
+    let mut ui = UI::new(vp)?;
     let path = ui.run()?;
 
     if let Some(path) = path {

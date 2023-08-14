@@ -1,7 +1,7 @@
 use std::{io::stdout, time::Duration, path::{PathBuf, Path}};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style::{Print, Stylize}};
 use crate::{error::Result, rank::RankResult};
-use crate::rank::get_results;
+use crate::rank::Ranker;
 pub mod visual_pack;
 use visual_pack::{VisualPack, VisualPackChars};
 use dirs::home_dir;
@@ -19,23 +19,25 @@ pub struct UI {
     cursor: [usize; 2],
     state: UIState,
     vp: VisualPack,
-    results: Vec<RankResult>
+    results: Vec<RankResult>,
+    ranker: Ranker
 }
 
 impl UI {
-    pub fn new(visual_pack: VisualPack) -> Self {
-        Self {
+    pub fn new(visual_pack: VisualPack) -> Result<Self> {
+        Ok(Self {
             input: String::new(),
             display_input: String::new(),
             output: None,
             cursor: [visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count(), 0],
             state: UIState::None,
             vp: visual_pack,
-            results: Vec::new()
-        }
+            results: Vec::new(),
+            ranker: Ranker::new()?
+        })
     }
 
-    pub fn default() -> Self {
+    pub fn default() -> Result<Self> {
         Self::new(VisualPack::ExtendedUnicode)
     }
 
@@ -116,7 +118,7 @@ impl UI {
 
         let result_count = terminal::size()?.1 as usize - 2;
 
-        self.results = get_results(&self.input, result_count)?;
+        self.results = self.ranker.get_results(&self.input, result_count)?;
 
         // Check if cursor is out of bounds
         if self.cursor[0] >= (self.input.len()+input_offset) {

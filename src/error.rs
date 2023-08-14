@@ -1,19 +1,26 @@
 #[derive(Debug)]
 pub enum Error {
-    Rusqlite(rusqlite::Error),
+    //Rusqlite(rusqlite::Error),
     Io(std::io::Error),
+    RustBert(rust_bert::RustBertError),
     CliArgs(String)
 }
 
-impl From<rusqlite::Error> for Error {
-    fn from(value: rusqlite::Error) -> Self {
-        Self::Rusqlite(value)
-    }
-}
+//impl From<rusqlite::Error> for Error {
+//    fn from(value: rusqlite::Error) -> Self {
+//        Self::Rusqlite(value)
+//    }
+//}
 
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
+    }
+}
+
+impl From<rust_bert::RustBertError> for Error {
+    fn from(value: rust_bert::RustBertError) -> Self {
+        Self::RustBert(value)
     }
 }
 
