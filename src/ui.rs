@@ -4,6 +4,7 @@ use crate::{error::Result, rank::RankResult};
 use crate::rank::get_results;
 pub mod visual_pack;
 use visual_pack::{VisualPack, VisualPackChars};
+use dirs::home_dir;
 
 enum UIState {
     None,
@@ -109,7 +110,7 @@ impl UI {
                 self.output = Some(self.results[self.cursor[1]-1].path.clone());
                 self.state = UIState::Quitting;
                 return Ok(());
-            }
+            },
             UserAction::None => {}
         }
 
@@ -135,11 +136,19 @@ impl UI {
 
         let current_path = Path::new(".").canonicalize()?;
         let current_path = current_path.to_str().unwrap_or("");
+
+        let home_dir = match home_dir() {
+            Some(p) => p.to_str().unwrap_or("").to_owned(),
+            None => "".to_string()
+        };
+
         for (i, result) in self.results.iter().enumerate() {
             let symbol = self.vp.get_symbol(result.result_type.into());
             let mut path = result.path.display().to_string();
-            if path.starts_with(current_path) {
+            if path.starts_with(current_path) && path != current_path {
                 path = path.replacen(current_path, ".", 1);
+            } else if path.starts_with(&home_dir) && path != home_dir {
+                path = path.replacen(&home_dir, "~", 1);
             }
             let mut line = format!("\r\n {} {}", symbol, path);
             if self.cursor[1] == (i+1) {

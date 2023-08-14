@@ -1,6 +1,8 @@
 use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap};
 use crate::error::Result;
 
+mod embedding;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PathType {
     Dir,
