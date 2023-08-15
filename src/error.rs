@@ -3,6 +3,7 @@ pub enum Error {
     //Rusqlite(rusqlite::Error),
     Io(std::io::Error),
     RustBert(rust_bert::RustBertError),
+    KdTree(kdtree::ErrorKind),
     CliArgs(String)
 }
 
@@ -21,6 +22,12 @@ impl From<std::io::Error> for Error {
 impl From<rust_bert::RustBertError> for Error {
     fn from(value: rust_bert::RustBertError) -> Self {
         Self::RustBert(value)
+    }
+}
+
+impl From<kdtree::ErrorKind> for Error {
+    fn from(value: kdtree::ErrorKind) -> Self {
+        Self::KdTree(value)
     }
 }
 

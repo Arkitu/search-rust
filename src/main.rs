@@ -1,15 +1,24 @@
 use std::env;
+use std::path::PathBuf;
 //mod db;
 mod error;
 mod ui;
 mod rank;
 use error::Error;
 use error::Result;
+use rank::embedding::Embedder;
 //use db::DB;
 use ui::UI;
 use ui::visual_pack::VisualPack;
 
 fn main() -> Result<()> {
+    let mut embedder = Embedder::new()?;
+    embedder.embed_to_cache(&["coucou c'est la vie"], &PathBuf::from("/coucou.txt"))?;
+    println!("{:#?}", embedder.cache);
+    Ok(())
+}
+
+fn maint() -> Result<()> {
     let mut db_path = None;
     let mut target_file = None;
     let mut vp = VisualPack::ExtendedUnicode;

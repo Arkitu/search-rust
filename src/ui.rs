@@ -12,7 +12,7 @@ enum UIState {
     Quitting
 }
 
-pub struct UI {
+pub struct UI<'a> {
     input: String,
     display_input: String,
     output: Option<PathBuf>,
@@ -20,10 +20,10 @@ pub struct UI {
     state: UIState,
     vp: VisualPack,
     results: Vec<RankResult>,
-    ranker: Ranker
+    ranker: Ranker<'a>
 }
 
-impl UI {
+impl UI<'_> {
     pub fn new(visual_pack: VisualPack) -> Result<Self> {
         Ok(Self {
             input: String::new(),
@@ -165,7 +165,7 @@ impl UI {
     }
 }
 
-impl Drop for UI {
+impl Drop for UI<'_> {
     fn drop(&mut self) {
         terminal::disable_raw_mode().expect("Unable to disable raw mode");
         execute!(stdout(), cursor::SetCursorStyle::DefaultUserShape).expect("Unable to turn the cursor back to normal");

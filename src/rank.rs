@@ -1,7 +1,7 @@
 use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap};
 use crate::error::Result;
 
-mod embedding;
+pub mod embedding;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PathType {
@@ -25,10 +25,10 @@ pub struct RankResult {
     pub score: f32
 }
 
-pub struct Ranker {
-    embedder: embedding::Embedder
+pub struct Ranker<'a> {
+    embedder: embedding::Embedder<'a>
 }
-impl Ranker {
+impl Ranker<'_> {
     pub fn new() -> Result<Self> {
         Ok(Self {
             embedder: embedding::Embedder::new()?
