@@ -1,20 +1,13 @@
-use crossterm::cursor;
+use crossterm::{cursor, style::{Stylize, StyledContent}};
 
-use crate::rank::PathType;
+use crate::rank::RankSource;
 
+#[derive(Copy, Clone)]
 pub enum VisualPackChars {
-    ResultTypeDir,
-    ResultTypeFile,
+    /// (source, is_dir)
+    ResultLeft(RankSource, bool),
     SearchBarLeft,
     SearchBarRight
-}
-impl From<PathType> for VisualPackChars {
-    fn from(result_type: PathType) -> Self {
-        match result_type {
-            PathType::Dir => Self::ResultTypeDir,
-            PathType::File => Self::ResultTypeFile
-        }
-    }
 }
 
 pub enum VisualPack {
@@ -27,20 +20,17 @@ impl VisualPack {
     pub fn get_symbol(&self, symbol: VisualPackChars) -> &'static str {
         match self {
             VisualPack::ExtendedUnicode => match symbol {
-                VisualPackChars::ResultTypeDir => "֎",
-                VisualPackChars::ResultTypeFile => "۞",
+                VisualPackChars::ResultLeft(s, d) => if d {"֎"} else {"۞"},
                 VisualPackChars::SearchBarLeft => "ᗧ ",
                 VisualPackChars::SearchBarRight => " ᗤ"
             },
             VisualPack::CommonUnicode => match symbol {
-                VisualPackChars::ResultTypeDir => "▸",
-                VisualPackChars::ResultTypeFile => "▪",
+                VisualPackChars::ResultLeft(s, d) => if d {"▸"} else {"▪"},
                 VisualPackChars::SearchBarLeft => "[",
                 VisualPackChars::SearchBarRight => " ]"
             },
             VisualPack::Ascii => match symbol {
-                VisualPackChars::ResultTypeDir => ">",
-                VisualPackChars::ResultTypeFile => "*",
+                VisualPackChars::ResultLeft(s, d) => if d {">"} else {"*"},
                 VisualPackChars::SearchBarLeft => "[",
                 VisualPackChars::SearchBarRight => " ]"
             }
@@ -52,6 +42,21 @@ impl VisualPack {
             VisualPack::CommonUnicode => cursor::SetCursorStyle::BlinkingBlock,
             VisualPack::Ascii => cursor::SetCursorStyle::BlinkingBlock,
             _ => cursor::SetCursorStyle::DefaultUserShape
+        }
+    }
+    pub fn get_colored_symbol(&self, symbol: VisualPackChars) -> StyledContent<&str> {
+        let s = self.get_symbol(symbol);
+        match self {
+            VisualPack::ExtendedUnicode => match symbol {
+                VisualPackChars::SearchBarLeft | VisualPackChars::SearchBarRight => s.bold(),
+                VisualPackChars::ResultLeft(so, dir) => match so {
+                    RankSource::ExactPath => s.green(),
+                    RankSource::StartLikePath => s.blue(),
+                    RankSource::InDir => s.dark_blue(),
+                    RankSource::Semantic => s.yellow()
+                }
+            },
+            _ => s.stylize()
         }
     }
 }
