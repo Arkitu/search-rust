@@ -1,9 +1,10 @@
-use std::{path::{Path, PathBuf}, fs::read_dir, collections::HashMap};
+use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap}, thread, fmt::Binary};
 use scan_dir::ScanDir;
 
 use crate::error::Result;
 
 pub mod embedding;
+use embedding::{Embedder, Task};
 
 #[derive(Clone, Copy, Debug)]
 pub enum RankSource {
@@ -22,7 +23,7 @@ pub struct RankResult {
 impl RankResult {
     pub fn new(path: PathBuf, score: f32, source: RankSource) -> Self {
         Self {
-            path: path.clone(),
+            path: path.canonicalize().unwrap(),
             score,
             source
         }
@@ -33,38 +34,22 @@ impl RankResult {
 }
 
 pub struct Ranker {
-    embedder: embedding::Embedder
+    embedder: Embedder,
+    last_input: String
 }
 impl Ranker {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            embedder: embedding::Embedder::new()?
+            embedder: Embedder::new()?,
+            last_input: String::new()
         })
     }
 
     pub fn init(&mut self) -> Result<()> {
-        ScanDir::all().skip_hidden(true).skip_backup(true).walk(".", |iter|{
-            for (entry, filename) in iter {
-
-                let mut prompts = vec![];
-
-                prompts.push("file: ".to_string() + &filename);
-
-                let name = filename.split('.').next().unwrap().replace('_', " ");
-                
-                prompts.push("name: ".to_string() + &name);
-
-                if filename.contains('.') {
-                    prompts.push("extension: ".to_string() + filename.split_once('.').unwrap().1);
-                }
-
-                eprintln!("{}", prompts.join(" / "));
-                
-                let entry_path = entry.path().canonicalize().unwrap();
-                
-                self.embedder.embed_to_cache(&prompts, &entry_path.as_path()).unwrap();
-            }
-        })?;
+        let embedder = self.embedder.clone();
+        thread::spawn(move || {
+            embedder.execute_tasks().unwrap();
+        });
         Ok(())
     }
 
@@ -137,13 +122,42 @@ impl Ranker {
             let path: PathBuf = n.1.into();
 
             if let Some(r) = results.get(&path) {
-                if r.score > (3. + n.0) {
-                    results.insert(path.clone().canonicalize()?, RankResult::new(path, (3.+n.0), RankSource::Semantic));
+                if r.score < 3. {
+                    results.insert(r.path.clone(), RankResult::new(path, r.score-1.+n.0, r.source));
+                } else if r.score > (3. + n.0) {
+                    results.insert(r.path.clone(), RankResult::new(path, 3.+n.0, RankSource::Semantic));
                 }
             } else {
-                results.insert(path.clone().canonicalize()?, RankResult::new(path, (3.+n.0), RankSource::Semantic));
+                results.insert(path.clone().canonicalize()?, RankResult::new(path, 3.+n.0, RankSource::Semantic));
             }
         }
+
+        // Launch tasks to embed paths in embedder cache
+        let mut tasks = BinaryHeap::new();
+        for r in results.values() {
+            if r.score > 3. {
+                continue;
+            }
+            tasks.push(Task::new(r.path.clone(), r.score));
+            if r.is_dir() {
+                for entry in read_dir(r.path.clone())? {
+                    let entry = entry?;
+                    let mut path = entry.path();
+                    path = path.canonicalize()?;
+                    tasks.push(Task::new(path, r.score+1.));
+                }
+            }
+        }
+
+        if self.last_input != input {
+            self.embedder.set_tasks(tasks)?;
+        } else {
+            for task in tasks {
+                self.embedder.add_task(task)?;
+            }
+        }
+
+        self.last_input = input.to_string();
 
         Ok(results)
     }

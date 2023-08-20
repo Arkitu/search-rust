@@ -9,7 +9,8 @@ pub enum Error {
     ScanDirVec(Vec<scan_dir::Error>),
     KdTree(kdtree::ErrorKind),
     LockPoison(String),
-    CliArgs(String)
+    CliArgs(String),
+    EmptyPath
 }
 
 //impl From<rusqlite::Error> for Error {
