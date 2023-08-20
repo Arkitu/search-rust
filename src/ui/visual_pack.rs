@@ -10,6 +10,7 @@ pub enum VisualPackChars {
     SearchBarRight
 }
 
+#[derive(Copy, Clone)]
 pub enum VisualPack {
     ExtendedUnicode,
     CommonUnicode,

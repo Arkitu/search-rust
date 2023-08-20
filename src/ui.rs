@@ -1,4 +1,4 @@
-use std::{io::stdout, time::Duration, path::{PathBuf, Path}};
+use std::{io::stdout, time::Duration, path::{PathBuf, Path}, thread, sync::{atomic::{AtomicU16, Ordering}, Arc, RwLock}};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style::{Print, Stylize}};
 use crate::{error::Result, rank::RankResult};
 use crate::rank::Ranker;
@@ -6,41 +6,35 @@ pub mod visual_pack;
 use visual_pack::{VisualPack, VisualPackChars};
 use dirs::home_dir;
 
+#[derive(Clone)]
 enum UIState {
     None,
     Searching,
-    Quitting
+    // Path chosen
+    Quitting(Option<PathBuf>)
 }
 
 pub struct UI {
-    input: String,
-    display_input: String,
-    output: Option<PathBuf>,
-    cursor: [usize; 2],
-    input_offset: usize,
-    state: UIState,
+    input: Arc<RwLock<String>>,
+    display_input: Arc<RwLock<String>>,
+    cursor: [Arc<AtomicU16>; 2],
+    input_offset: u16,
+    state: Arc<RwLock<UIState>>,
     vp: VisualPack,
-    results: Vec<RankResult>,
-    ranker: Ranker,
-    writer: Writer
+    results: Arc<RwLock<Vec<RankResult>>>
 }
 
 impl UI {
     pub fn new(visual_pack: VisualPack) -> Result<Self> {
-        let mut ranker = Ranker::new()?;
-        ranker.init()?;
-        let input_offset = visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count()+1;
+        let input_offset = (visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count()+1) as u16;
         Ok(Self {
-            input: String::new(),
-            display_input: String::new(),
-            output: None,
-            cursor: [input_offset, 0],
+            input: Arc::new(RwLock::new(String::new())),
+            display_input: Arc::new(RwLock::new(String::new())),
+            cursor: [Arc::new(AtomicU16::new(input_offset)), Arc::new(AtomicU16::new(0))],
             input_offset,
-            state: UIState::None,
+            state: Arc::new(RwLock::new(UIState::None)),
             vp: visual_pack,
-            results: Vec::new(),
-            ranker,
-            writer: Writer::new()
+            results: Arc::new(RwLock::new(Vec::new()))
         })
     }
 
@@ -50,15 +44,55 @@ impl UI {
 
     pub fn run(&mut self) -> Result<Option<PathBuf>> {
         self.init()?;
-        self.state = UIState::Searching;
+        *self.state.write()? = UIState::Searching;
+        // thread::spawn(|| {
+        //     loop {
+
+        //     }
+        // })
+
+        // process input
+        let input = self.input.clone();
+        let display_input = self.display_input.clone();
+        let state = self.state.clone();
+        let cursor = self.cursor.clone();
+        let input_offset = self.input_offset;
+        let results = self.results.clone();
+        thread::spawn(move || {
+            loop {
+                Self::process_input(&input, &display_input, &state, &cursor, input_offset, &results).unwrap();
+            }
+        });
+
+        // rank
+        let results = self.results.clone();
+        let input = self.input.clone();
+        thread::spawn(move || {
+            let mut ranker = Ranker::new().unwrap();
+            ranker.init().unwrap();
+            loop {
+                Self::rank(&results, &input, &mut ranker).unwrap();
+            }
+        });
+
+        // render
+        let vp = self.vp.clone();
+        let display_input = self.display_input.clone();
+        let results = self.results.clone();
+        let cursor = self.cursor.clone();
+        thread::spawn(move || {
+            let mut writer = Writer::new();
+            loop {
+                Self::render(vp, &mut writer, &display_input, &results, &cursor).unwrap();
+            }
+        });
+
         loop {
-            self.render()?;
-            if let UIState::Quitting = self.state {
+            if let UIState::Quitting(p) = (*self.state.read()?).clone() {
                 Writer::clear_screen()?;
-                break;
+                return Ok(p);
             }
         }
-        Ok(self.output.clone())
     }
 
     fn init(&self) -> Result<()> {
@@ -67,56 +101,57 @@ impl UI {
         Ok(())
     }
 
-    fn render(&mut self) -> Result<()> {
+    fn process_input(input: &Arc<RwLock<String>>, display_input: &Arc<RwLock<String>>, state: &Arc<RwLock<UIState>>, cursor: &[Arc<AtomicU16>; 2], input_offset: u16, results: &Arc<RwLock<Vec<RankResult>>>) -> Result<()> {
+        let mut display_input = display_input.write()?;
+        let results = results.read()?;
         match Reader::process_keypress()? {
             UserAction::Quit => {
-                self.state = UIState::Quitting;
+                *state.write()? = UIState::Quitting(None);
                 return Ok(());
             },
             UserAction::NewChar(c) => {
-                self.input.insert(self.cursor[0]-self.input_offset, c);
-                self.cursor[0] += 1;
-                self.cursor[1] = 0;
+                input.write()?.insert((cursor[0].load(Ordering::Relaxed) - input_offset) as usize, c);
+                cursor[0].fetch_add(1, Ordering::Release);
+                cursor[1].store(0, Ordering::Release);
             },
             UserAction::Move(direction) => {
                 match direction {
-                    Direction::Up => if self.cursor[1] != 0 {
-                        self.cursor[1] -= 1
+                    Direction::Up => if cursor[1].load(Ordering::Relaxed) > 0 {
+                        cursor[1].fetch_sub(1, Ordering::Release);
                     },
-                    Direction::Down => self.cursor[1] += 1,
-                    Direction::Left => if self.cursor[0] > self.input_offset {
-                            self.cursor[0] -= 1
+                    Direction::Down => {cursor[1].fetch_add(1, Ordering::Release);},
+                    Direction::Left => if cursor[0].load(Ordering::Relaxed) > input_offset {
+                            cursor[0].fetch_sub(1, Ordering::Release);
                     },
                     Direction::Right => {
-                        if self.cursor[1] != 0 {
-                            self.input = self.display_input.clone();
-                            self.cursor[0] = self.input.len()+self.input_offset;
-                            self.cursor[1] = 0;
+                        if cursor[1].load(Ordering::Relaxed) != 0 {
+                            *input.write()? = display_input.clone();
+                            cursor[0].store((input.read()?.len() as u16)+input_offset, Ordering::Release);
+                            cursor[1].store(0, Ordering::Release);
                         } else {
-                            self.cursor[0] += 1
+                            cursor[0].fetch_add(1, Ordering::Release);
                         }
                     }
                 }
             },
             UserAction::DeleteChar => {
-                if self.cursor[0] > self.input_offset {
-                    self.input.remove(self.cursor[0] - 1 - self.input_offset);
-                    self.cursor[0] -= 1;
+                if cursor[0].load(Ordering::Relaxed) > input_offset {
+                    input.write()?.remove((cursor[0].load(Ordering::Relaxed) - 1 - input_offset) as usize);
+                    cursor[0].fetch_sub(1, Ordering::Release);
                 }
-                self.cursor[1] = 0;
+                cursor[1].store(0, Ordering::Release);
             },
             UserAction::NextResult => {
-                self.cursor[1] += 1;
-                if self.cursor[1] > self.results.len() {
-                    self.cursor[1] = 1;
+                cursor[1].fetch_add(1, Ordering::Release);
+                if cursor[1].load(Ordering::Relaxed) as usize > results.len() {
+                    cursor[1].store(1, Ordering::Release);
                 }
             },
             UserAction::GotoResult => {
-                if self.cursor[1] == 0 {
-                    self.cursor[1] = 1;
+                if cursor[1].load(Ordering::Relaxed) == 0 {
+                    cursor[1].store(1, Ordering::Release);
                 }
-                self.output = Some(self.results[self.cursor[1]-1].path.clone());
-                self.state = UIState::Quitting;
+                *state.write()? = UIState::Quitting(Some(results[(cursor[1].load(Ordering::Relaxed) as usize)-1].path.clone()));
                 return Ok(());
             },
             UserAction::None => {}
@@ -124,23 +159,36 @@ impl UI {
 
         let result_count = terminal::size()?.1 as usize - 3;
 
-        self.results = self.ranker.get_results(&self.input, result_count)?;
-
         // Check if cursor is out of bounds
-        if self.cursor[0] >= (self.input.len()+self.input_offset) {
-            self.cursor[0] = self.input.len()+self.input_offset;
+        let input_len = input.read()?.len() as u16;
+        if cursor[0].load(Ordering::Relaxed) >= (input_len + input_offset) {
+            cursor[0].store(input_len + input_offset, Ordering::Release);
         }
-        if self.cursor[1] > self.results.len() {
-            self.cursor[1] = self.results.len();
+        if cursor[1].load(Ordering::Relaxed) > results.len() as u16 {
+            cursor[1].store(results.len() as u16, Ordering::Release);
         }
 
-        self.display_input = if self.cursor[1] == 0 {
-            self.input.to_string()
+        *display_input = if cursor[1].load(Ordering::Relaxed) == 0 {
+            input.read()?.to_string()
         } else {
-            self.results[self.cursor[1]-1].path.display().to_string()
+            results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path.display().to_string()
         };
 
-        let mut output_text = format!(" {}{}{}\r\n", self.vp.get_colored_symbol(VisualPackChars::SearchBarLeft), self.display_input, self.vp.get_colored_symbol(VisualPackChars::SearchBarRight));
+        Ok(())
+    }
+
+    fn rank(results: &Arc<RwLock<Vec<RankResult>>>, input: &Arc<RwLock<String>>, ranker: &mut Ranker) -> Result<()> {
+        let input = input.read()?.clone();
+        let result_count = terminal::size()?.1 as usize - 3;
+
+        *results.write()? = ranker.get_results(&input, result_count)?;
+        Ok(())
+    }
+
+    fn render(vp: VisualPack, writer: &mut Writer, display_input: &Arc<RwLock<String>>, results: &Arc<RwLock<Vec<RankResult>>>, cursor: &[Arc<AtomicU16>; 2]) -> Result<()> {
+        let result_count = terminal::size()?.1 as usize - 3;
+
+        let mut output_text = format!(" {}{}{}\r\n", vp.get_colored_symbol(VisualPackChars::SearchBarLeft), display_input.read()?, vp.get_colored_symbol(VisualPackChars::SearchBarRight));
 
         let current_path = Path::new(".").canonicalize()?;
         let current_path = current_path.to_str().unwrap_or("");
@@ -150,8 +198,8 @@ impl UI {
             None => "".to_string()
         };
 
-        for (i, result) in self.results.iter().enumerate() {
-            let symbol = self.vp.get_colored_symbol(VisualPackChars::ResultLeft(result.source, result.is_dir()));
+        for (i, result) in results.read()?.iter().enumerate() {
+            let symbol = vp.get_colored_symbol(VisualPackChars::ResultLeft(result.source, result.is_dir()));
             let mut path = result.path.display().to_string();
             if path.starts_with(current_path) && path != current_path {
                 path = path.replacen(current_path, ".", 1);
@@ -159,19 +207,19 @@ impl UI {
                 path = path.replacen(&home_dir, "~", 1);
             }
             let mut line = format!("\r\n {} {}", symbol, path);
-            if self.cursor[1] == (i+1) {
+            if cursor[1].load(Ordering::Relaxed) == (i as u16+1) {
                 line = line.on_dark_grey().to_string();
             }
             output_text.push_str(&line);
         }
 
-        for i in 0..result_count-self.results.len() {
+        for _ in 0..result_count-results.read()?.len() {
             output_text.push('\n');
         }
 
         output_text.push_str(&format!("\r\n {}", current_path).on_dark_grey().to_string());
 
-        self.writer.write(&output_text, [self.cursor[0], 0])?;
+        writer.write(&output_text, [cursor[0].load(Ordering::Relaxed), 0])?;
 
         Ok(())
     }
@@ -242,7 +290,7 @@ impl Reader {
 
 struct Writer {
     last_output: String,
-    cursor: [usize; 2]
+    cursor: [u16; 2]
 }
 impl Writer {
     pub fn new() -> Self {
@@ -256,15 +304,15 @@ impl Writer {
         execute!(stdout(), cursor::MoveTo(0, 0))?;
         Ok(())
     }
-    pub fn write(&mut self, s: &str, cursor: [usize; 2]) -> Result<()> {
+    pub fn write(&mut self, s: &str, cursor: [u16; 2]) -> Result<()> {
         if s != self.last_output {
             Self::clear_screen()?;
             execute!(stdout(), Print(s))?;
-            execute!(stdout(), cursor::MoveTo(cursor[0] as u16, cursor[1] as u16))?;
+            execute!(stdout(), cursor::MoveTo(cursor[0], cursor[1]))?;
             self.last_output = s.to_owned();
             self.cursor = cursor;
         } else if cursor != self.cursor {
-            execute!(stdout(), cursor::MoveTo(cursor[0] as u16, cursor[1] as u16))?;
+            execute!(stdout(), cursor::MoveTo(cursor[0], cursor[1]))?;
             self.cursor = cursor;
         }
         Ok(())
