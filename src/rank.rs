@@ -205,9 +205,15 @@ impl Ranker {
             }
         }
 
+        // If this is the first time we search for this input, don't check semantic to be faster
+        if self.last_input.is_empty() {
+            self.last_input = input.to_string();
+            return Ok(results);
+        }
+
         let current_dir = std::env::current_dir().unwrap();
         // Check semantic with embedder
-        let nearests = self.embedder.nearest(input, result_count-results.len()).unwrap();
+        let nearests = self.embedder.nearest(input, result_count-results.len().min(result_count)).unwrap();
         for (score, near_path) in nearests {
             if let Some(r) = results.get(&near_path) {
                 if r.score < 3. {
