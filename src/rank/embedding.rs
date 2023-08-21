@@ -6,16 +6,26 @@ use dotext::{self, MsDoc, doc::OpenOfficeDoc};
 
 pub type EmbedderCache = KdTree<f32, PathBuf, Arc<[f32]>>;
 
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
+pub enum TaskKind {
+    Name,
+    // (nb of paragraphs) to avoid too much embedding with files with a lot of paragraphs. If the file has more paragraphs the paragraphs will be grouped
+    Paragraphs(usize),
+    Sentences
+}
+
 pub struct Task {
     path: PathBuf,
     // lower is higher
-    priority: f32
+    priority: f32,
+    kind: TaskKind
 }
 impl Task {
-    pub fn new(path: PathBuf, priority: f32) -> Self {
+    pub fn new(path: PathBuf, priority: f32, kind: TaskKind) -> Self {
         Self {
             path,
-            priority
+            priority,
+            kind
         }
     }
 }
@@ -46,7 +56,7 @@ pub struct Embedder {
     cache: Arc<RwLock<EmbedderCache>>,
     /// (path to embed, priority (lower is higher))
     tasks: Arc<RwLock<BinaryHeap<Task>>>,
-    embedded_paths: Arc<RwLock<HashSet<PathBuf>>>
+    pub embedded_paths: Arc<RwLock<HashSet<(PathBuf, TaskKind)>>>
 }
 impl Embedder {
     pub fn new() -> Result<Self> {
@@ -115,16 +125,12 @@ impl Embedder {
         Ok(content)
     }
 
-    pub fn path_to_cache(&self, path: PathBuf) -> Result<()> {
-        if self.embedded_paths.read()?.contains(&path) {
-            return Ok(());
-        }
-        let mut prompts = vec![];
+    fn get_file_name_prompts(&self, path: &PathBuf) -> Result<Vec<String>> {
+        let mut prompts = Vec::new();
         let filename = match path.file_name() {
-            None => return Ok(()),
+            None => return Ok(prompts),
             Some(filename) => filename.to_str().ok_or(Error::CannotConvertOsStr)?
         };
-
         if path.is_dir() {
             prompts.push("directory: ".to_string() + filename);
         } else {
@@ -132,27 +138,83 @@ impl Embedder {
         }
 
         let name = path.file_stem().ok_or(Error::CannotGetFileStem)?.to_str().ok_or(Error::CannotConvertOsStr)?.replace('_', " ");
-        
         prompts.push("name: ".to_string() + &name);
 
         if !path.is_dir() {
             if let Some(e) = path.extension() {
                 let e = e.to_str().ok_or(Error::CannotConvertOsStr)?;
                 prompts.push("extension: ".to_string() + e);
+            }
+        }
 
-                if let Ok(content) = Self::read_file_content(&path) {
-                    if !content.is_empty() {
-                        prompts.push(content);
+        Ok(prompts)
+    }
+
+    fn get_file_content_prompts(&self, path: &PathBuf) -> Result<Vec<String>> {
+        let mut prompts = Vec::new();
+        if !path.is_dir() {
+            if let Ok(content) = Self::read_file_content(&path) {
+                if !content.is_empty() {
+                    prompts.push(content);
+                }
+            }
+        }
+        Ok(prompts)
+    }
+
+    fn get_file_paragraphs_prompts(&self, path: &PathBuf, nb: usize) -> Result<Vec<String>> {
+        if nb == 1 {
+            return self.get_file_content_prompts(path);
+        }
+        let mut prompts = Vec::new();
+        if !path.is_dir() {
+            if let Ok(content) = Self::read_file_content(&path) {
+                if !content.is_empty() {
+                    let mut content: Vec<String> = content.split("\n\n").map(|p| p.to_string()).collect();
+
+                    // Remove empty paragraphs
+                    content.retain(|p| !p.is_empty());
+
+                    // if there is more paragraphs than nb, group them 2 by 2 until there is nb paragraphs
+                    if content.len() > nb {
+                        while content.len() > nb {
+                            let mut new_content: Vec<String> = Vec::new();
+                            for double in content.chunks(2) {
+                                new_content.push(double.join("\n\n"));
+                            }
+                            content = new_content;
+                        }
+                    }
+
+                    for p in content {
+                        prompts.push(p.to_string());
                     }
                 }
             }
         }
+        Ok(prompts)
+    }
 
-        //eprintln!("{}", prompts.join(" / "));
-        
-        self.embed_to_cache(&prompts, &path).unwrap();
+    pub fn execute_task(&self, task: Task) -> Result<()> {
+        if self.embedded_paths.read()?.contains(&(task.path.clone(), task.kind)) {
+            return Ok(());
+        }
 
-        self.embedded_paths.write()?.insert(path);
+        //eprintln!("embedding with level {:?} : {} ", task.kind, task.path.display());
+
+        let prompts = match task.kind {
+            TaskKind::Name => self.get_file_name_prompts(&task.path),
+            TaskKind::Paragraphs(nb) => self.get_file_paragraphs_prompts(&task.path, nb),
+            _ => Err(Error::NotImplementedYet)
+        };
+
+        if let Ok(prompts) = prompts {
+            if prompts.len() > 0 {
+                self.embed_to_cache(&prompts, &task.path).unwrap();
+            }
+        }
+
+        self.embedded_paths.write()?.insert((task.path, task.kind));
 
         Ok(())
     }
@@ -175,7 +237,7 @@ impl Embedder {
         let task = tasks.pop().unwrap();
         drop(tasks);
 
-        self.path_to_cache(task.path).unwrap();
+        self.execute_task(task).unwrap();
 
         Ok(())
     }

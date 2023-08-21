@@ -3,7 +3,7 @@ use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap
 use crate::error::{Result, Error};
 
 pub mod embedding;
-use embedding::{Embedder, Task};
+use embedding::{Embedder, Task, TaskKind};
 
 #[derive(Clone, Copy, Debug)]
 pub enum RankSource {
@@ -35,16 +35,18 @@ impl RankResult {
     }
 }
 
-const MAX_SCORE: f32 = 5.;
+const TASK_NAME_SCORE_LIMIT: f32 = 8.;
+const TASK_PARAGRAPHS_SCORE_LIMIT: f32 = 5.;
+const TASK_SENTENCES_SCORE_LIMIT: f32 = 3.;
 const MAX_TASKS: usize = 100;
 fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut BinaryHeap<Task>) -> Result<()> {
-    if score > MAX_SCORE {
-        return Ok(());
-    }
     if tasks.len() >= MAX_TASKS {
         return Ok(());
     }
-    tasks.push(Task::new(path.clone(), score));
+    if score < TASK_NAME_SCORE_LIMIT {
+        
+        tasks.push(Task::new(path.clone(), score, TaskKind::Name));
+    }
     if path.is_dir() && !path.is_symlink() {
         let dir_iter = match read_dir(path.clone()) {
             Ok(dir_iter) => dir_iter,
@@ -73,6 +75,15 @@ fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut BinaryHeap<Tas
                     walk_path_create_tasks(&path, score+1., tasks).unwrap();
                 }
             }
+        }
+    } else {
+        if score < TASK_PARAGRAPHS_SCORE_LIMIT {
+            if score > 0. {
+                tasks.push(Task::new(path.clone(), score+2., TaskKind::Paragraphs((10./score).round() as usize)));
+            }
+        }
+        if score < TASK_SENTENCES_SCORE_LIMIT {
+            tasks.push(Task::new(path.clone(), score+3., TaskKind::Sentences));
         }
     }
     Ok(())
@@ -192,11 +203,6 @@ impl Ranker {
                     }
                 }
             }
-        }
-
-        // Check if there are enough results
-        if results.len() >= result_count {
-            return Ok(results);
         }
 
         let current_dir = std::env::current_dir().unwrap();

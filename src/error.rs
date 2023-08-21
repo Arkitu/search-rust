@@ -12,6 +12,7 @@ pub enum Error {
     CliArgs(String),
     CannotConvertOsStr,
     CannotGetFileStem,
+    NotImplementedYet,
     Boxed(Box<Self>),
     Arced(Arc<Self>),
 }
