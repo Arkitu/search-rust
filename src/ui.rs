@@ -1,17 +1,24 @@
 use std::{io::stdout, time::Duration, path::{PathBuf, Path}, thread, sync::{atomic::{AtomicU16, Ordering}, Arc, RwLock}};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style::{Print, Stylize}};
-use crate::{error::Result, rank::RankResult};
+use crate::{error::{Result, Error}, rank::RankResult};
 use crate::rank::Ranker;
 pub mod visual_pack;
 use visual_pack::{VisualPack, VisualPackChars};
 use dirs::home_dir;
 
 #[derive(Clone)]
+enum QuittingReason {
+    Success(PathBuf),
+    UserAbort,
+    Error(Arc<Error>)
+}
+
+#[derive(Clone)]
 enum UIState {
     None,
     Searching,
     // Path chosen
-    Quitting(Option<PathBuf>)
+    Quitting(QuittingReason)
 }
 
 pub struct UI {
@@ -30,7 +37,7 @@ impl UI {
         Ok(Self {
             input: Arc::new(RwLock::new(String::new())),
             display_input: Arc::new(RwLock::new(String::new())),
-            cursor: [Arc::new(AtomicU16::new(input_offset)), Arc::new(AtomicU16::new(0))],
+            cursor: [Arc::new(AtomicU16::new(0)), Arc::new(AtomicU16::new(0))],
             input_offset,
             state: Arc::new(RwLock::new(UIState::None)),
             vp: visual_pack,
@@ -45,37 +52,39 @@ impl UI {
     pub fn run(&mut self) -> Result<Option<PathBuf>> {
         self.init()?;
         *self.state.write()? = UIState::Searching;
-        // thread::spawn(|| {
-        //     loop {
 
-        //     }
-        // })
+        let input_offset = self.input_offset;
 
         // process input
         let input = self.input.clone();
         let display_input = self.display_input.clone();
         let state = self.state.clone();
         let cursor = self.cursor.clone();
-        let input_offset = self.input_offset;
         let results = self.results.clone();
         thread::spawn(move || {
             loop {
-                Self::process_input(&input, &display_input, &state, &cursor, input_offset, &results).unwrap();
+                if let Err(e) = Self::process_input(&input, &display_input, &state, &cursor, input_offset, &results) {
+                    *state.write().unwrap() = UIState::Quitting(QuittingReason::Error(Arc::new(e)));
+                }
             }
         });
 
         // rank
+        let state = self.state.clone();
         let results = self.results.clone();
         let input = self.input.clone();
         thread::spawn(move || {
             let mut ranker = Ranker::new().unwrap();
             ranker.init().unwrap();
             loop {
-                Self::rank(&results, &input, &mut ranker).unwrap();
+                if let Err(e) = Self::rank(&results, &input, &mut ranker) {
+                    *state.write().unwrap() = UIState::Quitting(QuittingReason::Error(Arc::new(e)));
+                }
             }
         });
 
         // render
+        let state = self.state.clone();
         let vp = self.vp.clone();
         let display_input = self.display_input.clone();
         let results = self.results.clone();
@@ -83,14 +92,20 @@ impl UI {
         thread::spawn(move || {
             let mut writer = Writer::new();
             loop {
-                Self::render(vp, &mut writer, &display_input, &results, &cursor).unwrap();
+                if let Err(e) = Self::render(vp, &mut writer, &display_input, &results, &cursor, input_offset) {
+                    *state.write().unwrap() = UIState::Quitting(QuittingReason::Error(Arc::new(e)));
+                }
             }
         });
 
         loop {
-            if let UIState::Quitting(p) = (*self.state.read()?).clone() {
+            if let UIState::Quitting(qr) = (*self.state.read()?).clone() {
                 Writer::clear_screen()?;
-                return Ok(p);
+                match qr {
+                    QuittingReason::Success(p) => return Ok(Some(p)),
+                    QuittingReason::UserAbort => return Ok(None),
+                    QuittingReason::Error(e) => return Err(e.into())
+                }
             }
         }
     }
@@ -106,11 +121,11 @@ impl UI {
         let results = results.read()?;
         match Reader::process_keypress()? {
             UserAction::Quit => {
-                *state.write()? = UIState::Quitting(None);
+                *state.write()? = UIState::Quitting(QuittingReason::UserAbort);
                 return Ok(());
             },
             UserAction::NewChar(c) => {
-                input.write()?.insert((cursor[0].load(Ordering::Relaxed) - input_offset) as usize, c);
+                input.write()?.insert(cursor[0].load(Ordering::Relaxed) as usize, c);
                 cursor[0].fetch_add(1, Ordering::Release);
                 cursor[1].store(0, Ordering::Release);
             },
@@ -120,13 +135,13 @@ impl UI {
                         cursor[1].fetch_sub(1, Ordering::Release);
                     },
                     Direction::Down => {cursor[1].fetch_add(1, Ordering::Release);},
-                    Direction::Left => if cursor[0].load(Ordering::Relaxed) > input_offset {
+                    Direction::Left => if cursor[0].load(Ordering::Relaxed) > 0 {
                             cursor[0].fetch_sub(1, Ordering::Release);
                     },
                     Direction::Right => {
                         if cursor[1].load(Ordering::Relaxed) != 0 {
                             *input.write()? = display_input.clone();
-                            cursor[0].store((input.read()?.len() as u16)+input_offset, Ordering::Release);
+                            cursor[0].store(input.read()?.len() as u16, Ordering::Release);
                             cursor[1].store(0, Ordering::Release);
                         } else {
                             cursor[0].fetch_add(1, Ordering::Release);
@@ -135,8 +150,8 @@ impl UI {
                 }
             },
             UserAction::DeleteChar => {
-                if cursor[0].load(Ordering::Relaxed) > input_offset {
-                    input.write()?.remove((cursor[0].load(Ordering::Relaxed) - 1 - input_offset) as usize);
+                if cursor[0].load(Ordering::Relaxed) > 0 {
+                    input.write()?.remove((cursor[0].load(Ordering::Relaxed) - 1) as usize);
                     cursor[0].fetch_sub(1, Ordering::Release);
                 }
                 cursor[1].store(0, Ordering::Release);
@@ -151,7 +166,7 @@ impl UI {
                 if cursor[1].load(Ordering::Relaxed) == 0 {
                     cursor[1].store(1, Ordering::Release);
                 }
-                *state.write()? = UIState::Quitting(Some(results[(cursor[1].load(Ordering::Relaxed) as usize)-1].path.clone()));
+                *state.write()? = UIState::Quitting(QuittingReason::Success(results[(cursor[1].load(Ordering::Relaxed) as usize)-1].path.clone()));
                 return Ok(());
             },
             UserAction::None => {}
@@ -161,8 +176,8 @@ impl UI {
 
         // Check if cursor is out of bounds
         let input_len = input.read()?.len() as u16;
-        if cursor[0].load(Ordering::Relaxed) >= (input_len + input_offset) {
-            cursor[0].store(input_len + input_offset, Ordering::Release);
+        if cursor[0].load(Ordering::Relaxed) >= input_len {
+            cursor[0].store(input_len, Ordering::Release);
         }
         if cursor[1].load(Ordering::Relaxed) > results.len() as u16 {
             cursor[1].store(results.len() as u16, Ordering::Release);
@@ -185,7 +200,7 @@ impl UI {
         Ok(())
     }
 
-    fn render(vp: VisualPack, writer: &mut Writer, display_input: &Arc<RwLock<String>>, results: &Arc<RwLock<Vec<RankResult>>>, cursor: &[Arc<AtomicU16>; 2]) -> Result<()> {
+    fn render(vp: VisualPack, writer: &mut Writer, display_input: &Arc<RwLock<String>>, results: &Arc<RwLock<Vec<RankResult>>>, cursor: &[Arc<AtomicU16>; 2], input_offset: u16) -> Result<()> {
         let result_count = terminal::size()?.1 as usize - 3;
 
         let mut output_text = format!(" {}{}{}\r\n", vp.get_colored_symbol(VisualPackChars::SearchBarLeft), display_input.read()?, vp.get_colored_symbol(VisualPackChars::SearchBarRight));
@@ -219,7 +234,7 @@ impl UI {
 
         output_text.push_str(&format!("\r\n {}", current_path).on_dark_grey().to_string());
 
-        writer.write(&output_text, [cursor[0].load(Ordering::Relaxed), 0])?;
+        writer.write(&output_text, [cursor[0].load(Ordering::Relaxed)+input_offset, 0])?;
 
         Ok(())
     }

@@ -1,7 +1,7 @@
 use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap}, thread, fmt::Binary};
 use scan_dir::ScanDir;
 
-use crate::error::Result;
+use crate::error::{Result, Error};
 
 pub mod embedding;
 use embedding::{Embedder, Task};
@@ -23,7 +23,7 @@ pub struct RankResult {
 impl RankResult {
     pub fn new(path: PathBuf, score: f32, source: RankSource) -> Self {
         Self {
-            path: path.canonicalize().unwrap(),
+            path: path.canonicalize().unwrap_or(path),
             score,
             source
         }
@@ -31,6 +31,52 @@ impl RankResult {
     pub fn is_dir(&self) -> bool {
         self.path.is_dir()
     }
+    pub fn is_symlink(&self) -> bool {
+        self.path.is_symlink()
+    }
+}
+
+const MAX_SCORE: f32 = 5.;
+const MAX_TASKS: usize = 100;
+fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut BinaryHeap<Task>) -> Result<()> {
+    if score > MAX_SCORE {
+        return Ok(());
+    }
+    if tasks.len() >= MAX_TASKS {
+        return Ok(());
+    }
+    tasks.push(Task::new(path.clone(), score));
+    if path.is_dir() && !path.is_symlink() {
+        let dir_iter = match read_dir(path.clone()) {
+            Ok(dir_iter) => dir_iter,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied || e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(20) {
+                    return Ok(());
+                } else {
+                    panic!("Error {:?} with path {:?}", e, path);
+                }
+            }
+        };
+        for entry in dir_iter {
+            match entry {
+                Err(e) => {
+                    match e.kind() {
+                        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound => continue,
+                        _ => panic!("Error {:?} with path {:?}", e, path)
+                    }
+                },
+                Ok(entry) => {
+                    let mut path = entry.path();
+                    path = match path.canonicalize() {
+                        Ok(path) => path,
+                        Err(_) => continue
+                    };
+                    walk_path_create_tasks(&path, score+1., tasks).unwrap();
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct Ranker {
@@ -40,7 +86,7 @@ pub struct Ranker {
 impl Ranker {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            embedder: Embedder::new()?,
+            embedder: Embedder::new().unwrap(),
             last_input: String::new()
         })
     }
@@ -54,8 +100,6 @@ impl Ranker {
     }
 
     fn get_results_hashmap(&mut self, input: &str, result_count: usize) -> Result<HashMap<PathBuf, RankResult>> {
-        // path -> (ResultType, score)
-        // Lower score is better
         let mut results: HashMap<PathBuf, RankResult> = HashMap::new();
 
         let mut input = input.trim();
@@ -68,44 +112,84 @@ impl Ranker {
         let path = PathBuf::from(input);
 
         // If exact path exists, add it to results
-        if path.try_exists()? {
-            results.insert(path.clone().canonicalize()?, RankResult::new(path.clone(), 0., RankSource::ExactPath));
+        match path.try_exists() {
+            Ok(true) => {
+                results.insert(path.clone().canonicalize().unwrap(), RankResult::new(path.clone(), 0., RankSource::ExactPath));
 
-            // If input is a directory, add all its children to results
-            if path.is_dir() {
-                for entry in read_dir(input)? {
-                    let entry = entry?;
-                    let mut path = entry.path();
-                    path = path.canonicalize()?;
-                    if let Some(r) = results.get(&path) {
-                        if r.score > 2. {
-                            results.insert(path.clone(), RankResult::new(path, 2., RankSource::InDir));
+                // If input is a directory, add all its children to results
+                if path.is_dir() && !path.is_symlink() {
+                    match read_dir(path.clone()) {
+                        Err(e) => {
+                            if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                                return Err(e.into());
+                            }
+                        },
+                        Ok(dir_iter) => {
+                            for entry in dir_iter {
+                                match entry {
+                                    Err(e) => {
+                                        if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                                            return Err(e.into());
+                                        }
+                                    },
+                                    Ok(entry) => {
+                                        let mut path = entry.path();
+                                        path = path.canonicalize().unwrap_or(path);
+                                        if let Some(r) = results.get(&path) {
+                                            if r.score > 2. {
+                                                results.insert(path.clone(), RankResult::new(path, 2., RankSource::InDir));
+                                            }
+                                        } else {
+                                            results.insert(path.clone(), RankResult::new(path, 2., RankSource::InDir));
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    } else {
-                        results.insert(path.clone(), RankResult::new(path, 2., RankSource::InDir));
                     }
+                }
+            },
+            Ok(false) => {},
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(e.into());
                 }
             }
         }
 
         // Check if there are paths that starts with input
         if let Some(mut dirname) = path.parent() {
-            if path.is_relative() && dirname.to_str().is_some() && dirname.to_str().unwrap().is_empty() {
+            if path.is_relative() && dirname.to_str().is_some() && dirname.to_str().ok_or(Error::CannotConvertOsStr).unwrap().is_empty() {
                 dirname = Path::new(".");
             }
-            if dirname.try_exists()? {
-                for entry in read_dir(dirname)? {
-                    let entry = entry?;
-                    let entry_path = entry.path();
-                    if entry_path.file_name().unwrap().to_str().unwrap().starts_with(path.file_name().unwrap_or_default().to_str().unwrap()) {
-                    
-                        if let Some(r) = results.get(&path) {
-                            if r.score > 1. {
-                                results.insert(entry_path.clone().canonicalize()?, RankResult::new(entry_path, 1., RankSource::StartLikePath));
+            match read_dir(dirname) {
+                Ok(dir_iter) => {
+                    for entry in dir_iter {
+                        match entry {
+                            Err(e) => {
+                                if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                                    return Err(e.into());
+                                }
+                            },
+                            Ok(entry) => {
+                                let entry_path = entry.path();
+                                if entry_path.file_name().unwrap().to_str().ok_or(Error::CannotConvertOsStr).unwrap().starts_with(path.file_name().unwrap_or_default().to_str().ok_or(Error::CannotConvertOsStr).unwrap()) {
+                                
+                                    if let Some(r) = results.get(&path) {
+                                        if r.score > 1. {
+                                            results.insert(entry_path.clone().canonicalize().unwrap(), RankResult::new(entry_path, 1., RankSource::StartLikePath));
+                                        }
+                                    } else {
+                                        results.insert(entry_path.clone().canonicalize().unwrap(), RankResult::new(entry_path, 1., RankSource::StartLikePath));
+                                    }
+                                }
                             }
-                        } else {
-                            results.insert(entry_path.clone().canonicalize()?, RankResult::new(entry_path, 1., RankSource::StartLikePath));
                         }
+                    }
+                },
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                        return Err(e.into());
                     }
                 }
             }
@@ -117,7 +201,7 @@ impl Ranker {
         }
 
         // Check semantic with embedder
-        let nearests = self.embedder.nearest(input, result_count-results.len())?;
+        let nearests = self.embedder.nearest(input, result_count-results.len()).unwrap();
         for n in nearests {
             let path: PathBuf = n.1.into();
 
@@ -128,32 +212,21 @@ impl Ranker {
                     results.insert(r.path.clone(), RankResult::new(path, 3.+n.0, RankSource::Semantic));
                 }
             } else {
-                results.insert(path.clone().canonicalize()?, RankResult::new(path, 3.+n.0, RankSource::Semantic));
+                results.insert(path.clone().canonicalize().unwrap(), RankResult::new(path, 3.+n.0, RankSource::Semantic));
             }
         }
 
         // Launch tasks to embed paths in embedder cache
         let mut tasks = BinaryHeap::new();
         for r in results.values() {
-            if r.score > 3. {
-                continue;
-            }
-            tasks.push(Task::new(r.path.clone(), r.score));
-            if r.is_dir() {
-                for entry in read_dir(r.path.clone())? {
-                    let entry = entry?;
-                    let mut path = entry.path();
-                    path = path.canonicalize()?;
-                    tasks.push(Task::new(path, r.score+1.));
-                }
-            }
+            walk_path_create_tasks(&r.path, r.score, &mut tasks).unwrap();
         }
 
         if self.last_input != input {
-            self.embedder.set_tasks(tasks)?;
+            self.embedder.set_tasks(tasks).unwrap();
         } else {
             for task in tasks {
-                self.embedder.add_task(task)?;
+                self.embedder.add_task(task).unwrap();
             }
         }
 
@@ -163,7 +236,7 @@ impl Ranker {
     }
 
     pub fn get_results(&mut self, input: &str, result_count: usize) -> Result<Vec<RankResult>> {
-        let results_hashmap = self.get_results_hashmap(input, result_count)?;
+        let results_hashmap = self.get_results_hashmap(input, result_count).unwrap();
         
         let mut results: Vec<RankResult> = results_hashmap.into_values().collect();
 

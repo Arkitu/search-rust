@@ -61,7 +61,7 @@ impl Embedder {
         let embeds = self.embed(sentences)?;
 
         for embed in embeds {
-            self.cache.write()?.add(embed, path.canonicalize()?)?;
+            self.cache.write()?.add(embed, path.clone())?;
         }
 
         Ok(())
@@ -81,7 +81,10 @@ impl Embedder {
             return Ok(());
         }
         let mut prompts = vec![];
-        let filename = path.file_name().unwrap().to_str().unwrap();
+        let filename = match path.file_name() {
+            None => return Ok(()),
+            Some(filename) => filename.to_str().ok_or(Error::CannotConvertOsStr)?
+        };
 
         if path.is_dir() {
             prompts.push("directory: ".to_string() + filename);
@@ -89,12 +92,12 @@ impl Embedder {
             prompts.push("file: ".to_string() + filename);
         }
 
-        let name = path.file_stem().ok_or(Error::EmptyPath)?.to_str().unwrap().replace('_', " ");
+        let name = path.file_stem().ok_or(Error::CannotGetFileStem)?.to_str().ok_or(Error::CannotConvertOsStr)?.replace('_', " ");
         
         prompts.push("name: ".to_string() + &name);
 
         if let Some(e) = path.extension() {
-            prompts.push("extension: ".to_string() + e.to_str().unwrap());
+            prompts.push("extension: ".to_string() + e.to_str().ok_or(Error::CannotConvertOsStr)?);
         }
 
         eprintln!("{}", prompts.join(" / "));
@@ -124,7 +127,7 @@ impl Embedder {
         let task = tasks.pop().unwrap();
         drop(tasks);
 
-        self.path_to_cache(task.path)?;
+        self.path_to_cache(task.path).unwrap();
 
         Ok(())
     }

@@ -1,4 +1,4 @@
-use std::sync::{RwLockWriteGuard, PoisonError};
+use std::{sync::{PoisonError, Arc}, ffi::OsStr, path::{Path, PathBuf}};
 
 #[derive(Debug)]
 pub enum Error {
@@ -10,7 +10,12 @@ pub enum Error {
     KdTree(kdtree::ErrorKind),
     LockPoison(String),
     CliArgs(String),
-    EmptyPath
+    EmptyPath,
+    CannotConvertOsStr,
+    CannotGetFileName,
+    CannotGetFileStem,
+    Boxed(Box<Self>),
+    Arced(Arc<Self>),
 }
 
 //impl From<rusqlite::Error> for Error {
@@ -52,6 +57,18 @@ impl From<kdtree::ErrorKind> for Error {
 impl<T> From<PoisonError<T>> for Error {
     fn from(value: PoisonError<T>) -> Self {
         Self::LockPoison(value.to_string())
+    }
+}
+
+impl From<Box<Self>> for Error {
+    fn from(value: Box<Self>) -> Self {
+        Self::Boxed(value)
+    }
+}
+
+impl From<Arc<Self>> for Error {
+    fn from(value: Arc<Self>) -> Self {
+        Self::Arced(value)
     }
 }
 
