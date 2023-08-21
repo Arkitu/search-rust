@@ -1,5 +1,4 @@
-use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap}, thread, fmt::Binary};
-use scan_dir::ScanDir;
+use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap}, thread};
 
 use crate::error::{Result, Error};
 

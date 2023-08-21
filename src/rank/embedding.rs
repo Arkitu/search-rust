@@ -1,4 +1,4 @@
-use std::{path::{PathBuf, Path}, sync::{Arc, RwLock, Mutex}, thread, collections::{BinaryHeap, HashSet}};
+use std::{path::PathBuf, sync::{Arc, RwLock, Mutex}, thread, collections::{BinaryHeap, HashSet}};
 use crate::error::{Result, Error};
 use rust_bert::pipelines::sentence_embeddings::{builder::SentenceEmbeddingsBuilder, SentenceEmbeddingsModel, SentenceEmbeddingsModelType::AllMiniLmL12V2};
 use kdtree::{KdTree, distance::squared_euclidean};

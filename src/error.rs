@@ -1,4 +1,4 @@
-use std::{sync::{PoisonError, Arc}, ffi::OsStr, path::{Path, PathBuf}};
+use std::sync::{PoisonError, Arc};
 
 #[derive(Debug)]
 pub enum Error {
@@ -10,9 +10,7 @@ pub enum Error {
     KdTree(kdtree::ErrorKind),
     LockPoison(String),
     CliArgs(String),
-    EmptyPath,
     CannotConvertOsStr,
-    CannotGetFileName,
     CannotGetFileStem,
     Boxed(Box<Self>),
     Arced(Arc<Self>),

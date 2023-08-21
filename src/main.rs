@@ -1,12 +1,10 @@
 use std::env;
-use std::path::PathBuf;
 //mod db;
 mod error;
 mod ui;
 mod rank;
 use error::Error;
 use error::Result;
-use rank::embedding::Embedder;
 //use db::DB;
 use ui::UI;
 use ui::visual_pack::VisualPack;

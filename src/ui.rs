@@ -63,7 +63,7 @@ impl UI {
         let results = self.results.clone();
         thread::spawn(move || {
             loop {
-                if let Err(e) = Self::process_input(&input, &display_input, &state, &cursor, input_offset, &results) {
+                if let Err(e) = Self::process_input(&input, &display_input, &state, &cursor, &results) {
                     *state.write().unwrap() = UIState::Quitting(QuittingReason::Error(Arc::new(e)));
                 }
             }
@@ -116,7 +116,7 @@ impl UI {
         Ok(())
     }
 
-    fn process_input(input: &Arc<RwLock<String>>, display_input: &Arc<RwLock<String>>, state: &Arc<RwLock<UIState>>, cursor: &[Arc<AtomicU16>; 2], input_offset: u16, results: &Arc<RwLock<Vec<RankResult>>>) -> Result<()> {
+    fn process_input(input: &Arc<RwLock<String>>, display_input: &Arc<RwLock<String>>, state: &Arc<RwLock<UIState>>, cursor: &[Arc<AtomicU16>; 2], results: &Arc<RwLock<Vec<RankResult>>>) -> Result<()> {
         let mut display_input = display_input.write()?;
         let results = results.read()?;
         match Reader::process_keypress()? {
@@ -171,8 +171,6 @@ impl UI {
             },
             UserAction::None => {}
         }
-
-        let result_count = terminal::size()?.1 as usize - 3;
 
         // Check if cursor is out of bounds
         let input_len = input.read()?.len() as u16;

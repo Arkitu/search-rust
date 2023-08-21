@@ -21,17 +21,17 @@ impl VisualPack {
     pub fn get_symbol(&self, symbol: VisualPackChars) -> &'static str {
         match self {
             VisualPack::ExtendedUnicode => match symbol {
-                VisualPackChars::ResultLeft(s, d) => if d {"֎"} else {"۞"},
+                VisualPackChars::ResultLeft(_, d) => if d {"֎"} else {"۞"},
                 VisualPackChars::SearchBarLeft => "ᗧ ",
                 VisualPackChars::SearchBarRight => " ᗤ"
             },
             VisualPack::CommonUnicode => match symbol {
-                VisualPackChars::ResultLeft(s, d) => if d {"▸"} else {"▪"},
+                VisualPackChars::ResultLeft(_, d) => if d {"▸"} else {"▪"},
                 VisualPackChars::SearchBarLeft => "[",
                 VisualPackChars::SearchBarRight => " ]"
             },
             VisualPack::Ascii => match symbol {
-                VisualPackChars::ResultLeft(s, d) => if d {">"} else {"*"},
+                VisualPackChars::ResultLeft(_, d) => if d {">"} else {"*"},
                 VisualPackChars::SearchBarLeft => "[",
                 VisualPackChars::SearchBarRight => " ]"
             }
@@ -50,7 +50,7 @@ impl VisualPack {
         match self {
             VisualPack::ExtendedUnicode => match symbol {
                 VisualPackChars::SearchBarLeft | VisualPackChars::SearchBarRight => s.bold(),
-                VisualPackChars::ResultLeft(so, dir) => match so {
+                VisualPackChars::ResultLeft(so, _) => match so {
                     RankSource::ExactPath => s.green(),
                     RankSource::StartLikePath => s.blue(),
                     RankSource::InDir => s.dark_blue(),
