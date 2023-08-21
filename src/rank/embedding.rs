@@ -96,8 +96,23 @@ impl Embedder {
         
         prompts.push("name: ".to_string() + &name);
 
-        if let Some(e) = path.extension() {
-            prompts.push("extension: ".to_string() + e.to_str().ok_or(Error::CannotConvertOsStr)?);
+        if !path.is_dir() {
+            if let Some(e) = path.extension() {
+                let e = e.to_str().ok_or(Error::CannotConvertOsStr)?;
+                prompts.push("extension: ".to_string() + e);
+
+                let content = match e {
+                    "txt" | "md" => {
+                        let content = std::fs::read_to_string(&path)?;
+                        Some(content)
+                    },
+                    _ => None
+                };
+
+                if let Some(content) = content {
+                    prompts.push(content);
+                }
+            }
         }
 
         eprintln!("{}", prompts.join(" / "));
