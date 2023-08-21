@@ -199,19 +199,20 @@ impl Ranker {
             return Ok(results);
         }
 
+        let current_dir = std::env::current_dir().unwrap();
         // Check semantic with embedder
         let nearests = self.embedder.nearest(input, result_count-results.len()).unwrap();
-        for n in nearests {
-            let path: PathBuf = n.1.into();
-
-            if let Some(r) = results.get(&path) {
+        for (score, near_path) in nearests {
+            if let Some(r) = results.get(&near_path) {
                 if r.score < 3. {
-                    results.insert(r.path.clone(), RankResult::new(path, r.score-1.+n.0, r.source));
-                } else if r.score > (3. + n.0) {
-                    results.insert(r.path.clone(), RankResult::new(path, 3.+n.0, RankSource::Semantic));
+                    results.insert(r.path.clone(), RankResult::new(near_path, r.score-1.+score, r.source));
+                } else if r.score > (3. + score) {
+                    results.insert(r.path.clone(), RankResult::new(near_path, 3.+score, RankSource::Semantic));
                 }
             } else {
-                results.insert(path.clone().canonicalize().unwrap(), RankResult::new(path, 3.+n.0, RankSource::Semantic));
+                if near_path.starts_with(&current_dir) {
+                    results.insert(near_path.clone().canonicalize().unwrap(), RankResult::new(near_path, 3.+score, RankSource::Semantic));
+                }
             }
         }
 
