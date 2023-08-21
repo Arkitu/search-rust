@@ -1,7 +1,8 @@
-use std::{path::PathBuf, sync::{Arc, RwLock, Mutex}, thread, collections::{BinaryHeap, HashSet}};
+use std::{path::PathBuf, sync::{Arc, RwLock, Mutex}, thread, collections::{BinaryHeap, HashSet}, io::Read};
 use crate::error::{Result, Error};
 use rust_bert::pipelines::sentence_embeddings::{builder::SentenceEmbeddingsBuilder, SentenceEmbeddingsModel, SentenceEmbeddingsModelType::AllMiniLmL12V2};
 use kdtree::{KdTree, distance::squared_euclidean};
+use dotext::{self, MsDoc, doc::OpenOfficeDoc};
 
 pub type EmbedderCache = KdTree<f32, PathBuf, Arc<[f32]>>;
 
@@ -76,6 +77,44 @@ impl Embedder {
         Ok(embeds)
     }
 
+    pub fn read_file_content(path: &PathBuf) -> Result<String> {
+        let extension = match path.extension() {
+            None => return Ok("".to_string()),
+            Some(extension) => extension.to_str().unwrap_or("")
+        };
+        let content = match extension {
+            "docx" => {
+                let mut content = String::new();
+                dotext::Docx::open(&path)?.read_to_string(&mut content)?;
+                content
+            },
+            "xlsx" => {
+                let mut content = String::new();
+                dotext::Xlsx::open(&path)?.read_to_string(&mut content)?;
+                content
+            },
+            "pptx" => {
+                let mut content = String::new();
+                dotext::Pptx::open(&path)?.read_to_string(&mut content)?;
+               content
+            },
+            "odt" => {
+                let mut content = String::new();
+                dotext::Odt::open(&path)?.read_to_string(&mut content)?;
+                content
+            },
+            "odp" => {
+                let mut content = String::new();
+                dotext::Odp::open(&path)?.read_to_string(&mut content)?;
+                content
+            },
+            _ => {
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }
+        };
+        Ok(content)
+    }
+
     pub fn path_to_cache(&self, path: PathBuf) -> Result<()> {
         if self.embedded_paths.read()?.contains(&path) {
             return Ok(());
@@ -101,21 +140,15 @@ impl Embedder {
                 let e = e.to_str().ok_or(Error::CannotConvertOsStr)?;
                 prompts.push("extension: ".to_string() + e);
 
-                let content = match e {
-                    "txt" | "md" => {
-                        let content = std::fs::read_to_string(&path)?;
-                        Some(content)
-                    },
-                    _ => None
-                };
-
-                if let Some(content) = content {
-                    prompts.push(content);
+                if let Ok(content) = Self::read_file_content(&path) {
+                    if !content.is_empty() {
+                        prompts.push(content);
+                    }
                 }
             }
         }
 
-        eprintln!("{}", prompts.join(" / "));
+        //eprintln!("{}", prompts.join(" / "));
         
         self.embed_to_cache(&prompts, &path).unwrap();
 

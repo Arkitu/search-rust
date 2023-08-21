@@ -135,28 +135,24 @@ impl UI {
                         cursor[1].fetch_sub(1, Ordering::Release);
                     },
                     Direction::Down => {cursor[1].fetch_add(1, Ordering::Release);},
-                    Direction::Left => if cursor[0].load(Ordering::Relaxed) > 0 {
-                        if cursor[1].load(Ordering::Relaxed) > 0 {
-                            match results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path.parent() {
-                                Some(target) => {
-                                    let target_string = target.display().to_string();
-                                    *input.write()? = target_string.clone();
-                                    cursor[0].store(target_string.len() as u16, Ordering::Release);
-                                    cursor[1].store(0, Ordering::Release);
-                                    std::env::set_current_dir(target)?;
-                                },
-                                None => {}
-                            }
-                        } else {
-                            cursor[0].fetch_sub(1, Ordering::Release);
+                    Direction::Left => if cursor[1].load(Ordering::Relaxed) > 0 {
+                        match results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path.parent() {
+                            Some(target) => {
+                                *input.write()? = String::new();
+                                cursor[0].store(0, Ordering::Release);
+                                cursor[1].store(0, Ordering::Release);
+                                std::env::set_current_dir(target)?;
+                            },
+                            None => {}
                         }
+                    } else if cursor[0].load(Ordering::Relaxed) > 0 {
+                        cursor[0].fetch_sub(1, Ordering::Release);
                     },
                     Direction::Right => {
                         if cursor[1].load(Ordering::Relaxed) > 0 {
                             let target = &results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path;
-                            let target_string = target.display().to_string();
-                            *input.write()? = target_string.clone();
-                            cursor[0].store(target_string.len() as u16, Ordering::Release);
+                            *input.write()? = String::new();
+                            cursor[0].store(0, Ordering::Release);
                             cursor[1].store(0, Ordering::Release);
                             if target.is_dir() {
                                 std::env::set_current_dir(target)?;

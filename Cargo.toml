@@ -12,3 +12,4 @@ crossterm = "*"
 dirs = "*"
 rust-bert = { version="*", features=["download-libtorch"]}
 kdtree = "*"
+dotext = "*"
