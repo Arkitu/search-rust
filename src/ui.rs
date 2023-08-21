@@ -136,13 +136,27 @@ impl UI {
                     },
                     Direction::Down => {cursor[1].fetch_add(1, Ordering::Release);},
                     Direction::Left => if cursor[0].load(Ordering::Relaxed) > 0 {
+                        if cursor[1].load(Ordering::Relaxed) > 0 {
+                            match results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path.parent() {
+                                Some(target) => {
+                                    *input.write()? = target.display().to_string();
+                                    cursor[0].store(input.read()?.len() as u16, Ordering::Release);
+                                    cursor[1].store(0, Ordering::Release);
+                                    std::env::set_current_dir(target)?;
+                                },
+                                None => {}
+                            }
+                        } else {
                             cursor[0].fetch_sub(1, Ordering::Release);
+                        }
                     },
                     Direction::Right => {
-                        if cursor[1].load(Ordering::Relaxed) != 0 {
-                            *input.write()? = display_input.clone();
+                        if cursor[1].load(Ordering::Relaxed) > 0 {
+                            let target = &results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path;
+                            *input.write()? = target.display().to_string();
                             cursor[0].store(input.read()?.len() as u16, Ordering::Release);
                             cursor[1].store(0, Ordering::Release);
+                            std::env::set_current_dir(target)?;
                         } else {
                             cursor[0].fetch_add(1, Ordering::Release);
                         }
