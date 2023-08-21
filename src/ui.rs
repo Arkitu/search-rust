@@ -139,8 +139,9 @@ impl UI {
                         if cursor[1].load(Ordering::Relaxed) > 0 {
                             match results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path.parent() {
                                 Some(target) => {
-                                    *input.write()? = target.display().to_string();
-                                    cursor[0].store(input.read()?.len() as u16, Ordering::Release);
+                                    let target_string = target.display().to_string();
+                                    *input.write()? = target_string.clone();
+                                    cursor[0].store(target_string.len() as u16, Ordering::Release);
                                     cursor[1].store(0, Ordering::Release);
                                     std::env::set_current_dir(target)?;
                                 },
@@ -153,10 +154,13 @@ impl UI {
                     Direction::Right => {
                         if cursor[1].load(Ordering::Relaxed) > 0 {
                             let target = &results[(cursor[1].load(Ordering::Relaxed)-1) as usize].path;
-                            *input.write()? = target.display().to_string();
-                            cursor[0].store(input.read()?.len() as u16, Ordering::Release);
+                            let target_string = target.display().to_string();
+                            *input.write()? = target_string.clone();
+                            cursor[0].store(target_string.len() as u16, Ordering::Release);
                             cursor[1].store(0, Ordering::Release);
-                            std::env::set_current_dir(target)?;
+                            if target.is_dir() {
+                                std::env::set_current_dir(target)?;
+                            }
                         } else {
                             cursor[0].fetch_add(1, Ordering::Release);
                         }
