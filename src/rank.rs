@@ -131,7 +131,7 @@ impl Ranker {
                     match read_dir(path.clone()) {
                         Err(e) => {
                             if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
-                                return Err(e.into());
+                                panic!("Error {:?} with path {:?}", e, path)
                             }
                         },
                         Ok(dir_iter) => {
@@ -139,7 +139,7 @@ impl Ranker {
                                 match entry {
                                     Err(e) => {
                                         if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
-                                            return Err(e.into());
+                                            panic!("Error {:?} with path {:?}", e, path)
                                         }
                                     },
                                     Ok(entry) => {
@@ -162,44 +162,46 @@ impl Ranker {
             Ok(false) => {},
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
-                    return Err(e.into());
+                    panic!("Error {:?} with path {:?}", e, path)
                 }
             }
         }
 
         // Check if there are paths that starts with input
-        if let Some(mut dirname) = path.parent() {
-            if path.is_relative() && dirname.to_str().is_some() && dirname.to_str().ok_or(Error::CannotConvertOsStr).unwrap().is_empty() {
-                dirname = Path::new(".");
-            }
-            match read_dir(dirname) {
-                Ok(dir_iter) => {
-                    for entry in dir_iter {
-                        match entry {
-                            Err(e) => {
-                                if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
-                                    return Err(e.into());
-                                }
-                            },
-                            Ok(entry) => {
-                                let entry_path = entry.path();
-                                if entry_path.file_name().unwrap().to_str().ok_or(Error::CannotConvertOsStr).unwrap().starts_with(path.file_name().unwrap_or_default().to_str().ok_or(Error::CannotConvertOsStr).unwrap()) {
-                                
-                                    if let Some(r) = results.get(&path) {
-                                        if r.score > 1. {
-                                            results.insert(entry_path.clone().canonicalize().unwrap(), RankResult::new(entry_path, 1., RankSource::StartLikePath));
+        if !path.is_dir() && path.exists() {
+            if let Some(mut dirname) = path.canonicalize().unwrap().parent() {
+                // if path.is_relative() && dirname.to_str().is_some() && dirname.to_str().ok_or(Error::CannotConvertOsStr).unwrap().is_empty() {
+                //     dirname = Path::new(".");
+                // }
+                match read_dir(dirname) {
+                    Ok(dir_iter) => {
+                        for entry in dir_iter {
+                            match entry {
+                                Err(e) => {
+                                    if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                                        panic!("Error {:?} with path {:?}", e, path);
+                                    }
+                                },
+                                Ok(entry) => {
+                                    let entry_path = entry.path();
+                                    if entry_path.file_name().unwrap().to_str().ok_or(Error::CannotConvertOsStr).unwrap().starts_with(path.file_name().unwrap_or_default().to_str().ok_or(Error::CannotConvertOsStr).unwrap()) {
+                                    
+                                        if let Some(r) = results.get(&path) {
+                                            if r.score > 1. {
+                                                results.insert(entry_path.canonicalize().unwrap(), RankResult::new(entry_path, 1., RankSource::StartLikePath));
+                                            }
+                                        } else {
+                                            results.insert(entry_path.canonicalize().unwrap(), RankResult::new(entry_path, 1., RankSource::StartLikePath));
                                         }
-                                    } else {
-                                        results.insert(entry_path.clone().canonicalize().unwrap(), RankResult::new(entry_path, 1., RankSource::StartLikePath));
                                     }
                                 }
                             }
                         }
-                    }
-                },
-                Err(e) => {
-                    if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
-                        return Err(e.into());
+                    },
+                    Err(e) => {
+                        if e.kind() != std::io::ErrorKind::PermissionDenied && e.kind() != std::io::ErrorKind::NotFound {
+                            panic!("Error {:?} with path {:?}", e, path)
+                        }
                     }
                 }
             }

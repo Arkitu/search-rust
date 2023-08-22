@@ -1,6 +1,6 @@
 use std::{io::stdout, time::Duration, path::{PathBuf, Path}, thread, sync::{atomic::{AtomicU16, Ordering}, Arc, RwLock}};
 use crossterm::{terminal::{self, ClearType}, event::{self, KeyEvent, Event, KeyCode}, execute, cursor, style::{Print, Stylize}};
-use crate::{error::{Result, Error}, rank::RankResult};
+use crate::{error::{Result, Error}, rank::{RankResult, RankSource}};
 use crate::rank::Ranker;
 pub mod visual_pack;
 use visual_pack::{VisualPack, VisualPackChars};
@@ -26,6 +26,7 @@ pub struct UI {
     display_input: Arc<RwLock<String>>,
     cursor: [Arc<AtomicU16>; 2],
     input_offset: u16,
+    result_offset: u16,
     state: Arc<RwLock<UIState>>,
     vp: VisualPack,
     results: Arc<RwLock<Vec<RankResult>>>
@@ -34,11 +35,13 @@ pub struct UI {
 impl UI {
     pub fn new(visual_pack: VisualPack) -> Result<Self> {
         let input_offset = (visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count()+1) as u16;
+        let result_offset = (visual_pack.get_symbol(VisualPackChars::ResultLeft(RankSource::ExactPath, false)).chars().count()+2) as u16;
         Ok(Self {
             input: Arc::new(RwLock::new(String::new())),
             display_input: Arc::new(RwLock::new(String::new())),
             cursor: [Arc::new(AtomicU16::new(0)), Arc::new(AtomicU16::new(0))],
             input_offset,
+            result_offset,
             state: Arc::new(RwLock::new(UIState::None)),
             vp: visual_pack,
             results: Arc::new(RwLock::new(Vec::new()))
@@ -89,10 +92,11 @@ impl UI {
         let display_input = self.display_input.clone();
         let results = self.results.clone();
         let cursor = self.cursor.clone();
+        let result_offset = self.result_offset;
         thread::spawn(move || {
             let mut writer = Writer::new();
             loop {
-                if let Err(e) = Self::render(vp, &mut writer, &display_input, &results, &cursor, input_offset) {
+                if let Err(e) = Self::render(vp, &mut writer, &display_input, &results, &cursor, input_offset, result_offset) {
                     *state.write().unwrap() = UIState::Quitting(QuittingReason::Error(Arc::new(e)));
                 }
             }
@@ -212,27 +216,34 @@ impl UI {
         Ok(())
     }
 
-    fn render(vp: VisualPack, writer: &mut Writer, display_input: &Arc<RwLock<String>>, results: &Arc<RwLock<Vec<RankResult>>>, cursor: &[Arc<AtomicU16>; 2], input_offset: u16) -> Result<()> {
+    fn render(vp: VisualPack, writer: &mut Writer, display_input: &Arc<RwLock<String>>, results: &Arc<RwLock<Vec<RankResult>>>, cursor: &[Arc<AtomicU16>; 2], input_offset: u16, result_offset: u16) -> Result<()> {
         let result_count = terminal::size()?.1 as usize - 3;
 
         let mut output_text = format!(" {}{}{}\r\n", vp.get_colored_symbol(VisualPackChars::SearchBarLeft), display_input.read()?, vp.get_colored_symbol(VisualPackChars::SearchBarRight));
 
-        let current_path = Path::new(".").canonicalize()?;
-        let current_path = current_path.to_str().unwrap_or("");
+        let current_dir = std::env::current_dir()?;
+        let current_path = current_dir.to_str().unwrap_or("");
 
         let home_dir = match home_dir() {
             Some(p) => p.to_str().unwrap_or("").to_owned(),
             None => "".to_string()
         };
 
+        let terminal_width = terminal::size()?.0;
         for (i, result) in results.read()?.iter().enumerate() {
             let symbol = vp.get_colored_symbol(VisualPackChars::ResultLeft(result.source, result.is_dir()));
             let mut path = result.path.display().to_string();
-            if path.starts_with(current_path) && path != current_path {
+            if path.starts_with(current_path) && path != current_path && current_dir != Path::new("/") {
                 path = path.replacen(current_path, ".", 1);
             } else if path.starts_with(&home_dir) && path != home_dir {
                 path = path.replacen(&home_dir, "~", 1);
             }
+
+            // If path is to long to fit on one line, replace the start with "…"
+            if path.len() as u16 + result_offset > terminal_width {
+                path = "…".to_string() + &path[(path.len() as u16 + result_offset - terminal_width + 1) as usize..];
+            }
+
             let mut line = format!("\r\n {} {}", symbol, path);
             if cursor[1].load(Ordering::Relaxed) == (i as u16+1) {
                 line = line.on_dark_grey().to_string();
