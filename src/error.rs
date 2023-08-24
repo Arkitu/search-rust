@@ -7,7 +7,6 @@ pub enum Error {
     RustBert(rust_bert::RustBertError),
     ScanDir(scan_dir::Error),
     ScanDirVec(Vec<scan_dir::Error>),
-    KdTree(kdtree::ErrorKind),
     LockPoison(String),
     CliArgs(String),
     CannotConvertOsStr,
@@ -44,12 +43,6 @@ impl From<scan_dir::Error> for Error {
 impl From<Vec<scan_dir::Error>> for Error {
     fn from(value: Vec<scan_dir::Error>) -> Self {
         Self::ScanDirVec(value)
-    }
-}
-
-impl From<kdtree::ErrorKind> for Error {
-    fn from(value: kdtree::ErrorKind) -> Self {
-        Self::KdTree(value)
     }
 }
 

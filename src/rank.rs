@@ -3,7 +3,7 @@ use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap
 use crate::error::{Result, Error};
 
 pub mod embedding;
-use embedding::{Embedder, Task, TaskKind};
+use embedding::{Embedder, Task, EmbeddingState};
 
 #[derive(Clone, Copy, Debug)]
 pub enum RankSource {
@@ -45,7 +45,7 @@ fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut BinaryHeap<Tas
     }
     if score < TASK_NAME_SCORE_LIMIT {
         
-        tasks.push(Task::new(path.clone(), score, TaskKind::Name));
+        tasks.push(Task::new(path.clone(), score, EmbeddingState::Name));
     }
     if path.is_dir() && !path.is_symlink() {
         let dir_iter = match read_dir(path.clone()) {
@@ -79,11 +79,11 @@ fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut BinaryHeap<Tas
     } else {
         if score < TASK_PARAGRAPHS_SCORE_LIMIT {
             if score > 0. {
-                tasks.push(Task::new(path.clone(), score+2., TaskKind::Paragraphs((10./score).round() as usize)));
+                tasks.push(Task::new(path.clone(), score+2., EmbeddingState::Paragraphs((10./score).round() as usize)));
             }
         }
         if score < TASK_SENTENCES_SCORE_LIMIT {
-            tasks.push(Task::new(path.clone(), score+3., TaskKind::Sentences));
+            tasks.push(Task::new(path.clone(), score+3., EmbeddingState::Sentences));
         }
     }
     Ok(())
@@ -216,16 +216,16 @@ impl Ranker {
         let current_dir = std::env::current_dir().unwrap();
         // Check semantic with embedder
         let nearests = self.embedder.nearest(input, result_count-results.len().min(result_count)).unwrap();
-        for (score, near_path) in nearests {
-            if let Some(r) = results.get(&near_path) {
+        for (score, item) in nearests {
+            if let Some(r) = results.get(&item.path) {
                 if r.score < 3. {
-                    results.insert(r.path.clone(), RankResult::new(near_path, r.score-1.+score, r.source));
+                    results.insert(r.path.clone(), RankResult::new(item.path.clone(), r.score-1.+score, r.source));
                 } else if r.score > (3. + score) {
-                    results.insert(r.path.clone(), RankResult::new(near_path, 3.+score, RankSource::Semantic));
+                    results.insert(r.path.clone(), RankResult::new(item.path.clone(), 3.+score, RankSource::Semantic));
                 }
             } else {
-                if near_path.starts_with(&current_dir) {
-                    results.insert(near_path.clone().canonicalize().unwrap(), RankResult::new(near_path, 3.+score, RankSource::Semantic));
+                if item.path.starts_with(&current_dir) {
+                    results.insert(item.path.clone().canonicalize().unwrap(), RankResult::new(item.path.clone(), 3.+score, RankSource::Semantic));
                 }
             }
         }

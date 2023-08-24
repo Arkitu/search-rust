@@ -9,7 +9,14 @@ use error::Result;
 use ui::UI;
 use ui::visual_pack::VisualPack;
 
-fn main() -> Result<()> {
+mod custom_tree;
+
+// Just for test
+fn main() {
+
+}
+
+fn mainr() -> Result<()> {
     let mut db_path = None;
     let mut target_file = None;
     let mut vp = VisualPack::ExtendedUnicode;
