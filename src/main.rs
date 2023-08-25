@@ -10,25 +10,25 @@ use ui::UI;
 use ui::visual_pack::VisualPack;
 
 fn main() -> Result<()> {
-    let mut db_path = None;
+    let mut cache_path = None;
     let mut target_file = None;
     let mut vp = VisualPack::ExtendedUnicode;
 
     let args: Vec<String> = env::args().collect();
     for (i, arg) in env::args().enumerate() {
         match arg.as_str() {
-            "--db-path" => {
+            "--cache-path" => {
                 if i + 1 < args.len() {
-                    db_path = Some(args[i + 1].as_str());
+                    cache_path = Some(args[i + 1].as_str());
                 } else {
-                    return Err(Error::CliArgs("Bad args : --db_path".to_string()))
+                    return Err(Error::CliArgs("Bad args : --cache-path".to_string()))
                 }
             },
             "--target-file" => {
                 if i + 1 < args.len() {
                     target_file = Some(args[i + 1].as_str());
                 } else {
-                    return Err(Error::CliArgs("Bad args : --target_file".to_string()))
+                    return Err(Error::CliArgs("Bad args : --target-file".to_string()))
                 }
             },
             "--style" => {

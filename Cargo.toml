@@ -11,5 +11,6 @@ scan_dir = "*"
 crossterm = "*"
 dirs = "*"
 rust-bert = { version="*", features=["download-libtorch"]}
-kiddo = "*"
+rannoy = { git = "https://github.com/uzushino/rs-annoy" }
+kdtree = "*"
 dotext = "*"
