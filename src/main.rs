@@ -11,6 +11,7 @@ use ui::visual_pack::VisualPack;
 
 fn main() -> Result<()> {
     let mut cache_path = None;
+    let mut db_path = None;
     let mut target_file = None;
     let mut vp = VisualPack::ExtendedUnicode;
 
@@ -22,6 +23,13 @@ fn main() -> Result<()> {
                     cache_path = Some(args[i + 1].as_str());
                 } else {
                     return Err(Error::CliArgs("Bad args : --cache-path".to_string()))
+                }
+            },
+            "--db-path" => {
+                if i + 1 < args.len() {
+                    db_path = Some(args[i + 1].clone());
+                } else {
+                    return Err(Error::CliArgs("Bad args : --db-path".to_string()))
                 }
             },
             "--target-file" => {
@@ -55,7 +63,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut ui = UI::new(vp)?;
+    let mut ui = UI::new(vp, db_path)?;
     let path = ui.run()?;
 
     if let Some(path) = path {

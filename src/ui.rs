@@ -29,11 +29,12 @@ pub struct UI {
     result_offset: u16,
     state: Arc<RwLock<UIState>>,
     vp: VisualPack,
-    results: Arc<RwLock<Vec<RankResult>>>
+    results: Arc<RwLock<Vec<RankResult>>>,
+    db_path: Option<String>
 }
 
 impl UI {
-    pub fn new(visual_pack: VisualPack) -> Result<Self> {
+    pub fn new(visual_pack: VisualPack, db_path: Option<String>) -> Result<Self> {
         let input_offset = (visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count()+1) as u16;
         let result_offset = (visual_pack.get_symbol(VisualPackChars::ResultLeft(RankSource::ExactPath, false)).chars().count()+2) as u16;
         Ok(Self {
@@ -44,12 +45,13 @@ impl UI {
             result_offset,
             state: Arc::new(RwLock::new(UIState::None)),
             vp: visual_pack,
-            results: Arc::new(RwLock::new(Vec::new()))
+            results: Arc::new(RwLock::new(Vec::new())),
+            db_path
         })
     }
 
     pub fn default() -> Result<Self> {
-        Self::new(VisualPack::ExtendedUnicode)
+        Self::new(VisualPack::ExtendedUnicode, None)
     }
 
     pub fn run(&mut self) -> Result<Option<PathBuf>> {
@@ -76,8 +78,9 @@ impl UI {
         let state = self.state.clone();
         let results = self.results.clone();
         let input = self.input.clone();
+        let db_path = self.db_path.clone();
         thread::spawn(move || {
-            let mut ranker = Ranker::new().unwrap();
+            let mut ranker = Ranker::new(db_path).unwrap();
             ranker.init().unwrap();
             loop {
                 if let Err(e) = Self::rank(&results, &input, &mut ranker) {

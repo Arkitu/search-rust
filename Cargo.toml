@@ -14,3 +14,4 @@ rust-bert = { version="*", features=["download-libtorch"]}
 rannoy = { git = "https://github.com/uzushino/rs-annoy" }
 kdtree = "*"
 dotext = "*"
+rusqlite = { verstion="*", features=["bundled"] }
