@@ -1,82 +1,31 @@
-use std::{path::PathBuf, sync::{Arc, RwLock, Mutex}, thread, collections::BinaryHeap, io::Read};
+use std::{path::PathBuf, sync::{Arc, RwLock, Mutex}, thread, collections::{BinaryHeap, HashSet}, io::Read};
 use crate::error::{Result, Error};
 use rust_bert::pipelines::sentence_embeddings::{builder::SentenceEmbeddingsBuilder, SentenceEmbeddingsModel, SentenceEmbeddingsModelType::AllMiniLmL12V2};
-use kiddo::{distance::squared_euclidean, float::kdtree::KdTree};
+use kdtree::{KdTree, distance::squared_euclidean};
 use dotext::{self, MsDoc, doc::OpenOfficeDoc};
 
-pub struct CacheItem {
-    pub path: PathBuf,
-    state: EmbeddingState
-}
-
-pub struct EmbedderCache {
-    // <axisUnit, itemID, dimensionNumber, numberOfItemAtTheSamePositionOnOneAxis, maxNumberOfItems>
-    kdtree: KdTree<f32, u32, 384, 256, u32>,
-    paths: Vec<Arc<CacheItem>>
-}
-impl EmbedderCache {
-    pub fn new() -> Self {
-        Self {
-            kdtree: KdTree::new(),
-            paths: Vec::new()
-        }
-    }
-    pub fn add(&mut self, embed: &[f32; 384], item: CacheItem) {
-        let id = self.paths.len() as u32;
-        self.kdtree.add(embed, id);
-        self.paths.push(Arc::new(item));
-    }
-    pub fn nearest(&self, embed: &[f32; 384], count: usize) -> Vec<(f32, Arc<CacheItem>)> {
-        let nearest = self.kdtree.nearest_n(embed, count, &squared_euclidean);
-        nearest.into_iter().map(|n| (n.distance, self.paths[n.item as usize].clone())).collect()
-    }
-    pub fn contains(&self, item: &CacheItem) -> bool {
-        self.paths.iter().any(|p| p.path == item.path && p.state >= item.state)
-    }
-}
-
+pub type EmbedderCache = KdTree<f32, PathBuf, Arc<[f32]>>;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-pub enum EmbeddingState {
-    None,
+pub enum TaskKind {
     Name,
     // (nb of paragraphs) to avoid too much embedding with files with a lot of paragraphs. If the file has more paragraphs the paragraphs will be grouped
     Paragraphs(usize),
     Sentences
 }
-impl PartialOrd for EmbeddingState {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self == other {
-            return Some(std::cmp::Ordering::Equal);
-        }
-        match (self, other) {
-            (EmbeddingState::None, _) => Some(std::cmp::Ordering::Less),
-            (_, EmbeddingState::None) => Some(std::cmp::Ordering::Greater),
-            (EmbeddingState::Name, _) => Some(std::cmp::Ordering::Less),
-            (_, EmbeddingState::Name) => Some(std::cmp::Ordering::Greater),
-            (EmbeddingState::Paragraphs(_), EmbeddingState::Sentences) => Some(std::cmp::Ordering::Less),
-            (EmbeddingState::Sentences, EmbeddingState::Paragraphs(_)) => Some(std::cmp::Ordering::Greater),
-            (EmbeddingState::Paragraphs(a), EmbeddingState::Paragraphs(b)) => Some(a.cmp(b)),
-            (EmbeddingState::Sentences, EmbeddingState::Sentences) => Some(std::cmp::Ordering::Equal)
-        }
-    }
-}
-impl Ord for EmbeddingState {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
 
 pub struct Task {
-    item: CacheItem,
+    path: PathBuf,
     // lower is higher
-    priority: f32
+    priority: f32,
+    kind: TaskKind
 }
 impl Task {
-    pub fn new(path: PathBuf, priority: f32, kind: EmbeddingState) -> Self {
+    pub fn new(path: PathBuf, priority: f32, kind: TaskKind) -> Self {
         Self {
-            item: CacheItem { path, state: kind },
-            priority
+            path,
+            priority,
+            kind
         }
     }
 }
@@ -106,14 +55,16 @@ pub struct Embedder {
     model: Arc<Mutex<SentenceEmbeddingsModel>>,
     cache: Arc<RwLock<EmbedderCache>>,
     /// (path to embed, priority (lower is higher))
-    tasks: Arc<RwLock<BinaryHeap<Task>>>
+    tasks: Arc<RwLock<BinaryHeap<Task>>>,
+    pub embedded_paths: Arc<RwLock<HashSet<(PathBuf, TaskKind)>>>
 }
 impl Embedder {
     pub fn new() -> Result<Self> {
         Ok(Self {
             model: Arc::new(Mutex::new(SentenceEmbeddingsBuilder::remote(AllMiniLmL12V2).create_model()?)),
-            cache: Arc::new(RwLock::new(EmbedderCache::new())),
-            tasks: Arc::new(RwLock::new(BinaryHeap::new()))
+            cache: Arc::new(RwLock::new(KdTree::new(384))),
+            tasks: Arc::new(RwLock::new(BinaryHeap::new())),
+            embedded_paths: Arc::new(RwLock::new(HashSet::new()))
         })
     }
     pub fn embed_to_cache<S>(&self, sentences: &[S], path: &PathBuf) -> Result<()>
@@ -121,7 +72,7 @@ impl Embedder {
         let embeds = self.embed(sentences)?;
 
         for embed in embeds {
-            self.cache.write()?.add(&embed, CacheItem { path: path.clone(), state: EmbeddingState::None });
+            self.cache.write()?.add(embed, path.clone())?;
         }
 
         Ok(())
@@ -245,23 +196,25 @@ impl Embedder {
     }
 
     pub fn execute_task(&self, task: Task) -> Result<()> {
-        if self.cache.read()?.contains(&task.item) {
+        if self.embedded_paths.read()?.contains(&(task.path.clone(), task.kind)) {
             return Ok(());
         }
 
         //eprintln!("embedding with level {:?} : {} ", task.kind, task.path.display());
 
-        let prompts = match task.item.state {
-            EmbeddingState::Name => self.get_file_name_prompts(&task.item.path),
-            EmbeddingState::Paragraphs(nb) => self.get_file_paragraphs_prompts(&task.item.path, nb),
+        let prompts = match task.kind {
+            TaskKind::Name => self.get_file_name_prompts(&task.path),
+            TaskKind::Paragraphs(nb) => self.get_file_paragraphs_prompts(&task.path, nb),
             _ => Err(Error::NotImplementedYet)
         };
 
         if let Ok(prompts) = prompts {
             if prompts.len() > 0 {
-                self.embed_to_cache(&prompts, &task.item.path).unwrap();
+                self.embed_to_cache(&prompts, &task.path).unwrap();
             }
         }
+
+        self.embedded_paths.write()?.insert((task.path, task.kind));
 
         Ok(())
     }
@@ -305,11 +258,12 @@ impl Embedder {
         Ok(())
     }
 
-    pub fn nearest<S>(&mut self, sentence: &S, count: usize) -> Result<Vec<(f32, Arc<CacheItem>)>>
+    pub fn nearest<S>(&mut self, sentence: &S, count: usize) -> Result<Vec<(f32, PathBuf)>>
     where S: AsRef<str> + Sync + ?Sized {
         let embeds = self.embed(&[sentence])?;
         let embed = embeds[0].as_ref();
         let cache = self.cache.read()?;
-        Ok(cache.nearest(embed, count))
+        let nearest = cache.nearest(embed, count, &squared_euclidean)?;
+        Ok(nearest.into_iter().map(|(s, p)| (s, p.to_owned())).collect())
     }
 }
