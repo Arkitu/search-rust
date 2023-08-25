@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 use rusqlite::OptionalExtension;
 use rusqlite::ToSql;
 use rusqlite::params;

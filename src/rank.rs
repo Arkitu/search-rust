@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, fs::read_dir, collections::{HashMap, BinaryHeap}, thread};
+use std::{path::PathBuf, fs::read_dir, collections::HashMap};
 
 use crate::error::{Result, Error};
 
@@ -38,7 +38,7 @@ impl RankResult {
 const TASK_NAME_SCORE_LIMIT: f32 = 8.;
 const TASK_PARAGRAPHS_SCORE_LIMIT: f32 = 5.;
 const MAX_TASKS: usize = 100;
-fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut BinaryHeap<Task>) -> Result<()> {
+fn walk_path_create_tasks(path: &PathBuf, score: f32, tasks: &mut Vec<Task>) -> Result<()> {
     if tasks.len() >= MAX_TASKS {
         return Ok(());
     }
@@ -89,22 +89,19 @@ pub struct Ranker {
     last_input: String
 }
 impl Ranker {
-    pub fn new(db_path: Option<String>) -> Result<Self> {
-        Ok(Self {
-            embedder: Embedder::new(db_path),
+    pub async fn new(db_path: Option<String>) -> Self {
+        Self {
+            embedder: Embedder::new(db_path).await,
             last_input: String::new()
-        })
+        }
     }
 
-    pub fn init(&mut self) -> Result<()> {
+    pub fn init(&mut self) {
         let embedder = self.embedder.clone();
-        thread::spawn(move || {
-            embedder.execute_tasks().unwrap();
-        });
-        Ok(())
+        embedder.execute_tasks().unwrap();
     }
 
-    fn get_results_hashmap(&mut self, input: &str, result_count: usize) -> Result<HashMap<PathBuf, RankResult>> {
+    async fn get_results_hashmap(&mut self, input: &str, result_count: usize) -> HashMap<PathBuf, RankResult> {
         let mut results: HashMap<PathBuf, RankResult> = HashMap::new();
 
         let mut input = input.trim();
@@ -164,7 +161,7 @@ impl Ranker {
 
         // Check if there are paths that starts with input
         if !path.is_dir() && path.exists() {
-            if let Some(mut dirname) = path.canonicalize().unwrap().parent() {
+            if let Some(dirname) = path.canonicalize().unwrap().parent() {
                 // if path.is_relative() && dirname.to_str().is_some() && dirname.to_str().ok_or(Error::CannotConvertOsStr).unwrap().is_empty() {
                 //     dirname = Path::new(".");
                 // }
@@ -205,12 +202,12 @@ impl Ranker {
         // If this is the first time we search for this input, don't check semantic to be faster
         if self.last_input.is_empty() {
             self.last_input = input.to_string();
-            return Ok(results);
+            return results;
         }
 
         let current_dir = std::env::current_dir().unwrap();
         // Check semantic with embedder
-        let nearests = self.embedder.nearest(input, result_count-results.len().min(result_count));
+        let nearests = self.embedder.nearest(input, result_count-results.len().min(result_count)).await;
         for (score, path) in nearests {
             if let Some(r) = results.get(&path) {
                 if r.score < 3. {
@@ -230,26 +227,24 @@ impl Ranker {
         }
 
         // Launch tasks to embed paths in embedder cache
-        let mut tasks = BinaryHeap::new();
+        let mut tasks = Vec::new();
         for r in results.values() {
             walk_path_create_tasks(&r.path, r.score, &mut tasks).unwrap();
         }
 
         if self.last_input != input {
-            self.embedder.set_tasks(tasks).unwrap();
+            self.embedder.set_tasks(tasks.into()).await;
         } else {
-            for task in tasks {
-                self.embedder.add_task(task).unwrap();
-            }
+            self.embedder.add_tasks(tasks).await;
         }
 
         self.last_input = input.to_string();
 
-        Ok(results)
+        results
     }
 
-    pub fn get_results(&mut self, input: &str, result_count: usize) -> Result<Vec<RankResult>> {
-        let results_hashmap = self.get_results_hashmap(input, result_count).unwrap();
+    pub async fn get_results(&mut self, input: &str, result_count: usize) -> Vec<RankResult> {
+        let results_hashmap = self.get_results_hashmap(input, result_count).await;
         
         let mut results: Vec<RankResult> = results_hashmap.into_values().collect();
 
@@ -266,6 +261,6 @@ impl Ranker {
             results.truncate(result_count);
         }
 
-        Ok(results.to_vec())
+        results.to_vec()
     }
 }

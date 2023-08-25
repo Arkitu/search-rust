@@ -15,3 +15,4 @@ rannoy = { git = "https://github.com/uzushino/rs-annoy" }
 kdtree = "*"
 dotext = "*"
 rusqlite = { verstion="*", features=["bundled"] }
+tokio = { version="*", features=["full"] }

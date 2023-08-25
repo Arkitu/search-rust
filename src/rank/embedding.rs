@@ -1,7 +1,8 @@
-use std::{path::PathBuf, sync::{Arc, RwLock, Mutex}, thread, collections::BinaryHeap, io::Read};
+use std::{path::PathBuf, sync::Arc, collections::BinaryHeap, io::Read};
 use crate::error::{Result, Error};
 use rust_bert::pipelines::sentence_embeddings::{builder::SentenceEmbeddingsBuilder, SentenceEmbeddingsModel, SentenceEmbeddingsModelType::AllMiniLmL12V2};
 use dotext::{self, MsDoc, doc::OpenOfficeDoc};
+use tokio::{sync::{Mutex, RwLock}, task::spawn_blocking};
 
 mod cache;
 use cache::{Cache, Id};
@@ -50,35 +51,38 @@ pub struct Embedder {
     tasks: Arc<RwLock<BinaryHeap<Task>>>
 }
 impl Embedder {
-    pub fn new(db_path: Option<String>) -> Self {
+    pub async fn new(db_path: Option<String>) -> Self {
+        let model = spawn_blocking(move || {
+            SentenceEmbeddingsBuilder::remote(AllMiniLmL12V2).create_model().unwrap()
+        }).await.expect("Can't create model");
         Self {
-            model: Arc::new(Mutex::new(SentenceEmbeddingsBuilder::remote(AllMiniLmL12V2).create_model().expect("Can't create model"))),
+            model: Arc::new(Mutex::new(model)),
             cache: Arc::new(Mutex::new(Cache::new(db_path))),
             tasks: Arc::new(RwLock::new(BinaryHeap::new()))
         }
     }
-    pub fn embed<S>(&self, sentences: &[S]) -> Vec<Arc<[f32; 384]>>
+    pub async fn embed<S>(&self, sentences: &[S]) -> Vec<Arc<[f32; 384]>>
     where S: AsRef<str> + Sync {
-        let embeds = self.model.lock().expect("Can't lock model").encode(sentences).expect("Can't embed with model");
+        let embeds = self.model.lock().await.encode(sentences).expect("Can't embed with model");
         let embeds: Vec<Arc<[f32; 384]>> = embeds.into_iter().map(|embed|{
             Arc::new(embed.as_slice().try_into().unwrap())
         }).collect();
         embeds
     }
-    pub fn add_sentences_to_id<S>(&self, sentences: &[S], id: Id)
+    pub async fn add_sentences_to_id<S>(&self, sentences: &[S], id: Id)
     where S: AsRef<str> + Sync {
-        let embeds = self.embed(sentences);
-        let mut cache = self.cache.lock().expect("Can't lock cache");
+        let embeds = self.embed(sentences).await;
+        let mut cache = self.cache.lock().await;
         for embed in embeds {
             cache.add_embed_to_id(embed, id);
         }
     }
-    pub fn add_sentences_to_path<S>(&self, sentences: &[S], path: &PathBuf)
+    pub async fn add_sentences_to_path<S>(&self, sentences: &[S], path: &PathBuf)
     where S: AsRef<str> + Sync {
-        let cache = self.cache.lock().expect("Can't lock cache");
+        let cache = self.cache.lock().await;
         let id = cache.get_id_by_path(path).expect("Trying to get id of unknown path");
         drop(cache);
-        self.add_sentences_to_id(sentences, id)
+        self.add_sentences_to_id(sentences, id).await;
     }
 
     pub fn read_file_content(path: &PathBuf) -> Result<String> {
@@ -189,8 +193,8 @@ impl Embedder {
         Ok(prompts)
     }
 
-    pub fn execute_task(&self, task: Task) {
-        if self.cache.lock().expect("Can't aquire cache lock").contains(&task.item) {
+    pub async fn execute_task(&self, task: Task) {
+        if self.cache.lock().await.contains(&task.item) {
             return;
         }
 
@@ -203,54 +207,59 @@ impl Embedder {
 
         if let Ok(prompts) = prompts {
             if prompts.len() > 0 {
-                self.cache.lock().expect("Can't aquire cache lock").create_or_update_item(&task.item);
-                self.add_sentences_to_path(&prompts, &task.item.path);
+                self.cache.lock().await.create_or_update_item(&task.item);
+                self.add_sentences_to_path(&prompts, &task.item.path).await;
             }
         }
     }
 
     pub fn execute_tasks(&self) -> Result<()> {
         let clone = self.clone();
-        thread::spawn(move || {
+        tokio::spawn(async move {
             loop {
-                clone.next_task();
+                if let Some(task) = clone.tasks.write().await.pop() {
+                    let clone = clone.clone();
+                    tokio::spawn(async move {
+                        clone.execute_task(task).await;
+                    });
+                }
+                //clone.next_task();
             }
         });
         Ok(())
     }
 
-    fn next_task(&self) {
-        let mut tasks = self.tasks.write().expect("Can't lock tasks");
-        if tasks.len() == 0 {
-            return;
-        }
-        let task = tasks.pop().unwrap();
-        drop(tasks);
+    // fn next_task(&self) {
+    //     let mut tasks = self.tasks.write().expect("Can't lock tasks");
+    //     if tasks.len() == 0 {
+    //         return;
+    //     }
+    //     let task = tasks.pop().unwrap();
+    //     drop(tasks);
 
-        self.execute_task(task);
-    }
+    //     self.execute_task(task);
+    // }
 
-    pub fn add_task(&self, task: Task) -> Result<()> {
-        let mut tasks = self.tasks.write()?;
+    pub async fn add_task(&self, task: Task) {
+        let mut tasks = self.tasks.write().await;
         tasks.push(task);
-        Ok(())
+    }
+    pub async fn add_tasks(&self, tasks: Vec<Task>) {
+        let mut old_tasks = self.tasks.write().await;
+        for task in tasks {
+            old_tasks.push(task);
+        }
     }
 
-    pub fn set_tasks(&self, tasks: BinaryHeap<Task>) -> Result<()> {
-        *self.tasks.write()? = tasks;
-        Ok(())
+    pub async fn set_tasks(&self, tasks: BinaryHeap<Task>) {
+        *self.tasks.write().await = tasks;
     }
 
-    pub fn empty_tasks(&self) -> Result<()> {
-        *self.tasks.write()? = BinaryHeap::new();
-        Ok(())
-    }
-
-    pub fn nearest<S>(&mut self, sentence: &S, count: usize) -> Vec<(f32, PathBuf)>
+    pub async fn nearest<S>(&mut self, sentence: &S, count: usize) -> Vec<(f32, PathBuf)>
     where S: AsRef<str> + Sync + ?Sized {
-        let embeds = self.embed(&[sentence]);
+        let embeds = self.embed(&[sentence]).await;
         let embed = embeds[0].as_ref();
-        let cache = self.cache.lock().expect("Can't lock cache");
+        let cache = self.cache.lock().await;
         cache.nearest(embed, count)
     }
 }

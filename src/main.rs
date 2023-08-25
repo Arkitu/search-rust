@@ -1,15 +1,14 @@
 use std::env;
-//mod db;
 mod error;
 mod ui;
 mod rank;
 use error::Error;
 use error::Result;
-//use db::DB;
 use ui::UI;
 use ui::visual_pack::VisualPack;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let mut cache_path = None;
     let mut db_path = None;
     let mut target_file = None;
@@ -63,13 +62,13 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut ui = UI::new(vp, db_path)?;
-    let path = ui.run()?;
+    let mut ui = UI::new(vp, db_path);
+    let path = ui.run().await;
 
     if let Some(path) = path {
         // Write path to target file
         if let Some(target_file) = target_file {
-            std::fs::write(target_file, path.display().to_string())?;
+            std::fs::write(target_file, path.display().to_string()).expect("Can't write to target file");
         }
     }
 
