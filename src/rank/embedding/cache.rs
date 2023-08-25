@@ -35,11 +35,13 @@ impl Ord for EmbeddingState {
     }
 }
 
+#[derive(Debug)]
 pub struct CacheItem {
     pub path: PathBuf,
     pub state: EmbeddingState
 }
 
+#[derive(Debug)]
 pub struct Cache {
     temp_cache: TempCache,
     db: DB
@@ -55,21 +57,21 @@ impl Cache {
         self.db.insert_item(item)
     }
     pub fn create_or_update_item(&self, item: &CacheItem) {
-        self.db.upsert_item(item)
+        self.db.insert_or_update_item(item)
     }
     pub fn add_embed_to_id(&mut self, embed: Arc<[f32; 384]>, id: Id) {
         self.temp_cache.add(embed, id).expect("Can't add item to temp cache")
     }
-    pub fn add(&mut self, embed: Arc<[f32; 384]>, item: CacheItem) {
+    pub fn add_item(&mut self, embed: Arc<[f32; 384]>, item: CacheItem) {
         self.create_item(&item);
         let id = self.db.get_id_by_path(&item.path).expect("Can't get id of item just inserted");
-        self.temp_cache.add(embed, id);
+        self.temp_cache.add(embed, id).expect("Can't add item to temp cache");
     }
     pub fn nearest(&self, embed: &[f32; 384], count: usize) -> Vec<(f32, PathBuf)> {
         let nearest = self.temp_cache.nearest(embed, count, &squared_euclidean).expect("Can't get nearest in temp cache");
         nearest.into_iter().map(|(score, id)| (
             score,
-            self.db.get_path_by_id(*id).expect("Trying to get id that doesn't exist from db")
+            self.db.get_path_by_id(*id).expect(format!("Trying to get id that doesn't exist from db : {}", id).as_str())
         )).collect()
     }
     pub fn contains(&self, item: &CacheItem) -> bool {

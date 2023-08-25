@@ -7,6 +7,7 @@ mod cache;
 use cache::{Cache, Id};
 pub use cache::{EmbeddingState, CacheItem};
 
+#[derive(Debug)]
 pub struct Task {
     item: CacheItem,
     // lower is higher
@@ -67,14 +68,17 @@ impl Embedder {
     pub fn add_sentences_to_id<S>(&self, sentences: &[S], id: Id)
     where S: AsRef<str> + Sync {
         let embeds = self.embed(sentences);
-
+        let mut cache = self.cache.lock().expect("Can't lock cache");
         for embed in embeds {
-            self.cache.lock().expect("Can't lock cache").add_embed_to_id(embed, id);
+            cache.add_embed_to_id(embed, id);
         }
     }
     pub fn add_sentences_to_path<S>(&self, sentences: &[S], path: &PathBuf)
     where S: AsRef<str> + Sync {
-        self.add_sentences_to_id(sentences, self.cache.lock().expect("Can't lock cache").get_id_by_path(path).expect("Trying to get id of unknown path"))
+        let cache = self.cache.lock().expect("Can't lock cache");
+        let id = cache.get_id_by_path(path).expect("Trying to get id of unknown path");
+        drop(cache);
+        self.add_sentences_to_id(sentences, id)
     }
 
     pub fn read_file_content(path: &PathBuf) -> Result<String> {
@@ -185,9 +189,9 @@ impl Embedder {
         Ok(prompts)
     }
 
-    pub fn execute_task(&self, task: Task) -> Result<()> {
-        if self.cache.lock()?.contains(&task.item) {
-            return Ok(());
+    pub fn execute_task(&self, task: Task) {
+        if self.cache.lock().expect("Can't aquire cache lock").contains(&task.item) {
+            return;
         }
 
         let prompts = match task.item.state {
@@ -199,35 +203,31 @@ impl Embedder {
 
         if let Ok(prompts) = prompts {
             if prompts.len() > 0 {
-                self.cache.lock()?.create_or_update_item(&task.item);
+                self.cache.lock().expect("Can't aquire cache lock").create_or_update_item(&task.item);
                 self.add_sentences_to_path(&prompts, &task.item.path);
             }
         }
-
-        Ok(())
     }
 
     pub fn execute_tasks(&self) -> Result<()> {
         let clone = self.clone();
         thread::spawn(move || {
             loop {
-                clone.next_task().unwrap();
+                clone.next_task();
             }
         });
         Ok(())
     }
 
-    fn next_task(&self) -> Result<()> {
-        let mut tasks = self.tasks.write()?;
+    fn next_task(&self) {
+        let mut tasks = self.tasks.write().expect("Can't lock tasks");
         if tasks.len() == 0 {
-            return Ok(());
+            return;
         }
         let task = tasks.pop().unwrap();
         drop(tasks);
 
-        self.execute_task(task).unwrap();
-
-        Ok(())
+        self.execute_task(task);
     }
 
     pub fn add_task(&self, task: Task) -> Result<()> {

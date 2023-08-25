@@ -28,6 +28,7 @@ impl FromSql for EmbeddingState {
     }
 }
 
+#[derive(Debug)]
 pub struct DB {
     conn: Connection
 }
@@ -48,9 +49,9 @@ impl DB {
     pub fn create_tables(&self) {
         self.conn.execute("
             CREATE TABLE IF NOT EXISTS items (
-                id INT32 PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 path TEXT UNIQUE NOT NULL,
-                state INT NOT NULL DEFAULT 0
+                state INTEGER NOT NULL DEFAULT 0
             );
         ", []).expect("Can't create DB tables");
     }
@@ -58,11 +59,17 @@ impl DB {
     pub fn insert_item(&self, item: &CacheItem) {
         self.conn.execute("INSERT INTO items (path, state) VALUES (?1, ?2)", params![item.path.to_string_lossy(), item.state]).expect("Can't insert element");
     }
-    pub fn upsert_item(&self, item: &CacheItem) {
-        self.conn.execute("UPSERT INTO items (path, state) VALUES (?1, ?2)", params![item.path.to_string_lossy(), item.state]).expect("Can't upsert element");
+    pub fn update_item(&self, id: Id, item: &CacheItem) {
+        self.conn.execute("UPDATE items SET path = ?1, state = ?2 WHERE id = ?3", params![item.path.to_string_lossy(), item.state, id]).expect("Can't update element");
+    }
+    pub fn insert_or_update_item(&self, item: &CacheItem) {
+        match self.get_id_by_path(&item.path) {
+            Some(id) => self.update_item(id, item),
+            None => self.insert_item(item)
+        }
     }
     pub fn get_id_by_path(&self, path: &PathBuf) -> Option<Id> {
-        self.conn.query_row("SELECT id FROM items WHERE path = ?1", params![path.to_string_lossy()], |row| row.get(0)).optional().expect("Can't get id from path")
+        self.conn.query_row("SELECT id FROM items WHERE path = ?1", params![path.to_str().expect("Can't do path to str")], |row| row.get(0)).optional().expect("Can't get id from path")
     }
     pub fn get_path_by_id(&self, id: Id) -> Option<PathBuf> {
         match self.conn.query_row("SELECT path FROM items WHERE id = ?1", params![id], |row| row.get::<_, String>(0)).optional().expect("Can't get path from id") {
