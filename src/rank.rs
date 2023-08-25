@@ -220,7 +220,11 @@ impl Ranker {
                 }
             } else {
                 if path.starts_with(&current_dir) {
-                    results.insert(path.canonicalize().expect("Can't canonicalize path"), RankResult::new(path, 3.+score, RankSource::Semantic));
+                    let path = match path.canonicalize() {
+                        Ok(path) => path,
+                        Err(_) => continue
+                    };
+                    results.insert(path.clone(), RankResult::new(path, 3.+score, RankSource::Semantic));
                 }
             }
         }
