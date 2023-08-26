@@ -95,7 +95,7 @@ impl Embedder {
         self.add_sentences_to_id(sentences, id).await;
     }
 
-    pub fn read_file_content(path: &PathBuf) -> Result<String> {
+    pub async fn read_file_content(path: &PathBuf) -> Result<String> {
         let extension = match path.extension() {
             None => return Ok("".to_string()),
             Some(extension) => extension.to_str().unwrap_or("")
@@ -127,7 +127,7 @@ impl Embedder {
                 content
             },
             _ => {
-                std::fs::read_to_string(&path).unwrap_or(String::new())
+                tokio::fs::read_to_string(&path).await.unwrap_or(String::new())
             }
         };
         Ok(content)
@@ -158,10 +158,10 @@ impl Embedder {
         Ok(prompts)
     }
 
-    fn get_file_content_prompts(&self, path: &PathBuf) -> Result<Vec<String>> {
+    async fn get_file_content_prompts(&self, path: &PathBuf) -> Result<Vec<String>> {
         let mut prompts = Vec::new();
         if !path.is_dir() {
-            if let Ok(content) = Self::read_file_content(&path) {
+            if let Ok(content) = Self::read_file_content(&path).await {
                 if !content.is_empty() {
                     prompts.push(content);
                 }
@@ -170,13 +170,13 @@ impl Embedder {
         Ok(prompts)
     }
 
-    fn get_file_paragraphs_prompts(&self, path: &PathBuf, nb: usize) -> Result<Vec<String>> {
+    async fn get_file_paragraphs_prompts(&self, path: &PathBuf, nb: usize) -> Result<Vec<String>> {
         if nb == 1 {
-            return self.get_file_content_prompts(path);
+            return self.get_file_content_prompts(path).await;
         }
         let mut prompts = Vec::new();
         if !path.is_dir() {
-            if let Ok(content) = Self::read_file_content(&path) {
+            if let Ok(content) = Self::read_file_content(&path).await {
                 if !content.is_empty() {
                     let mut content: Vec<String> = content.split("\n\n").map(|p| p.to_string()).collect();
 
@@ -211,7 +211,7 @@ impl Embedder {
         let prompts = match task.item.state {
             EmbeddingState::None => Ok(Vec::new()),
             EmbeddingState::Name => self.get_file_name_prompts(&task.item.path),
-            EmbeddingState::Paragraphs(nb) => self.get_file_paragraphs_prompts(&task.item.path, nb),
+            EmbeddingState::Paragraphs(nb) => self.get_file_paragraphs_prompts(&task.item.path, nb).await,
             _ => Err(Error::NotImplementedYet)
         };
 

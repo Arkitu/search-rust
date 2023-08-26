@@ -79,10 +79,7 @@ impl UI {
         tokio::spawn(async move {
             let mut ranker = Ranker::new(db_path).await;
             ranker.init();
-            let mut counter = 0;
             loop {
-                counter += 1;
-                eprintln!("ranking {}", counter);
                 Self::rank(&results, &input, &mut ranker).await
             }
         });
@@ -125,7 +122,18 @@ impl UI {
                 return;
             },
             UserAction::NewChar(c) => {
-                input.write().await.insert(cursor[0].load(Ordering::Relaxed) as usize, c);
+                let mut input = input.write().await;
+                let mut new_input = input.chars().collect::<Vec<char>>();
+                new_input.insert(cursor[0].load(Ordering::Relaxed) as usize, c);
+                *input = new_input.iter().collect::<String>();
+                // let cursor0 = cursor[0].load(Ordering::Relaxed) as usize;
+                // for (i, char) in input.chars().enumerate() {
+                //     if i == cursor0 {
+                //         new_input.push(c);
+                //     }
+                //     new_input.push(char);
+                // }
+                // *input = new_input;
                 cursor[0].fetch_add(1, Ordering::Release);
                 cursor[1].store(0, Ordering::Release);
             },
@@ -165,7 +173,10 @@ impl UI {
             },
             UserAction::DeleteChar => {
                 if cursor[0].load(Ordering::Relaxed) > 0 {
-                    input.write().await.remove((cursor[0].load(Ordering::Relaxed) - 1) as usize);
+                    let mut input = input.write().await;
+                    let mut new_input = input.chars().collect::<Vec<char>>();
+                    new_input.remove(cursor[0].load(Ordering::Relaxed) as usize - 1);
+                    *input = new_input.iter().collect::<String>();
                     cursor[0].fetch_sub(1, Ordering::Release);
                 }
                 cursor[1].store(0, Ordering::Release);
