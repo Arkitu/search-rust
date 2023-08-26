@@ -48,7 +48,7 @@ pub struct Embedder {
     model: Arc<Mutex<SentenceEmbeddingsModel>>,
     /// Queue to permit high priority lock of the model as described in https://stackoverflow.com/a/11673600/16207028
     model_queue: Arc<Mutex<()>>,
-    cache: Arc<Mutex<Cache>>,
+    pub cache: Arc<Mutex<Cache>>,
     /// (path to embed, priority (lower is higher))
     tasks: Arc<RwLock<BinaryHeap<Task>>>
 }
@@ -203,17 +203,22 @@ impl Embedder {
         Ok(prompts)
     }
 
-    pub async fn execute_task(&self, task: Task) {
-        if self.cache.lock().await.contains(&task.item) {
-            return;
-        }
-
+    pub async fn get_prompts(&self, task: &Task) -> std::result::Result<Vec<String>, Error> {
         let prompts = match task.item.state {
             EmbeddingState::None => Ok(Vec::new()),
             EmbeddingState::Name => self.get_file_name_prompts(&task.item.path),
             EmbeddingState::Paragraphs(nb) => self.get_file_paragraphs_prompts(&task.item.path, nb).await,
             _ => Err(Error::NotImplementedYet)
         };
+        prompts
+    }
+
+    pub async fn execute_task(&self, task: Task) {
+        if self.cache.lock().await.contains(&task.item) {
+            return;
+        }
+
+        let prompts = self.get_prompts(&task).await;
 
         if let Ok(prompts) = prompts {
             if prompts.len() > 0 {

@@ -1,8 +1,9 @@
-use std::{sync::Arc, path::PathBuf};
+use std::{sync::Arc, path::PathBuf, fmt::{Debug, Formatter}};
 use kdtree::{KdTree, distance::squared_euclidean};
 
 mod db;
 use db::DB;
+use rannoy::Rannoy;
 
 pub type Id = i32;
 pub type TempCache = KdTree<f32, Id, Arc<[f32]>>;
@@ -41,15 +42,24 @@ pub struct CacheItem {
     pub state: EmbeddingState
 }
 
-#[derive(Debug)]
 pub struct Cache {
     temp_cache: TempCache,
+    annoy: Option<Rannoy>,
     db: DB
 }
+impl Debug for Cache {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cache")
+            .field("temp_cache", &self.temp_cache)
+            .field("db", &self.db)
+            .finish()
+    }
+}
 impl Cache {
-    pub fn new(db_path: Option<String>) -> Self {
+    pub fn new(db_path: Option<String>, cache_path: Option<String>) -> Self {
         Self {
             temp_cache: KdTree::new(384),
+            annoy: Rannoy::load(cache_path.as_deref()),
             db: DB::new(db_path)
         }
     }
@@ -61,11 +71,6 @@ impl Cache {
     }
     pub fn add_embed_to_id(&mut self, embed: Arc<[f32; 384]>, id: Id) {
         self.temp_cache.add(embed, id).expect("Can't add item to temp cache")
-    }
-    pub fn add_item(&mut self, embed: Arc<[f32; 384]>, item: CacheItem) {
-        self.create_item(&item);
-        let id = self.db.get_id_by_path(&item.path).expect("Can't get id of item just inserted");
-        self.temp_cache.add(embed, id).expect("Can't add item to temp cache");
     }
     pub fn nearest(&self, embed: &[f32; 384], count: usize) -> Vec<(f32, PathBuf)> {
         let nearest = self.temp_cache.nearest(embed, count, &squared_euclidean).expect("Can't get nearest in temp cache");

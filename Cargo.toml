@@ -16,3 +16,4 @@ kdtree = "*"
 dotext = "*"
 rusqlite = { verstion="*", features=["bundled"] }
 tokio = { version="*", features=["full"] }
+async-recursion = "*"

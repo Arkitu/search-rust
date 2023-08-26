@@ -2,8 +2,7 @@ use std::{path::PathBuf, fs::read_dir, collections::HashMap};
 
 use crate::error::{Result, Error};
 
-mod embedding;
-use embedding::{Embedder, Task, EmbeddingState, CacheItem};
+use crate::embedding::{Embedder, Task, EmbeddingState, CacheItem};
 
 #[derive(Clone, Copy, Debug)]
 pub enum RankSource {
