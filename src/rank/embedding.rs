@@ -46,6 +46,8 @@ impl Ord for Task {
 #[derive(Clone)]
 pub struct Embedder {
     model: Arc<Mutex<SentenceEmbeddingsModel>>,
+    /// Queue to permit high priority lock of the model as described in https://stackoverflow.com/a/11673600/16207028
+    model_queue: Arc<Mutex<()>>,
     cache: Arc<Mutex<Cache>>,
     /// (path to embed, priority (lower is higher))
     tasks: Arc<RwLock<BinaryHeap<Task>>>
@@ -57,16 +59,24 @@ impl Embedder {
         }).await.expect("Can't create model");
         Self {
             model: Arc::new(Mutex::new(model)),
+            model_queue: Arc::new(Mutex::new(())),
             cache: Arc::new(Mutex::new(Cache::new(db_path))),
             tasks: Arc::new(RwLock::new(BinaryHeap::new()))
         }
     }
-    pub async fn embed<S>(&self, sentences: &[S]) -> Vec<Arc<[f32; 384]>>
+    pub async fn embed_high_priotity<S>(&self, sentences: &[S]) -> Vec<Arc<[f32; 384]>>
     where S: AsRef<str> + Sync {
         let embeds = self.model.lock().await.encode(sentences).expect("Can't embed with model");
         let embeds: Vec<Arc<[f32; 384]>> = embeds.into_iter().map(|embed|{
             Arc::new(embed.as_slice().try_into().unwrap())
         }).collect();
+        embeds
+    }
+    pub async fn embed<S>(&self, sentences: &[S]) -> Vec<Arc<[f32; 384]>>
+    where S: AsRef<str> + Sync {
+        let queue = self.model_queue.lock().await;
+        let embeds = self.embed_high_priotity(sentences).await;
+        drop(queue);
         embeds
     }
     pub async fn add_sentences_to_id<S>(&self, sentences: &[S], id: Id)
@@ -257,7 +267,7 @@ impl Embedder {
 
     pub async fn nearest<S>(&mut self, sentence: &S, count: usize) -> Vec<(f32, PathBuf)>
     where S: AsRef<str> + Sync + ?Sized {
-        let embeds = self.embed(&[sentence]).await;
+        let embeds = self.embed_high_priotity(&[sentence]).await;
         let embed = embeds[0].as_ref();
         let cache = self.cache.lock().await;
         cache.nearest(embed, count)
