@@ -30,11 +30,12 @@ pub struct UI {
     state: Arc<RwLock<UIState>>,
     vp: VisualPack,
     results: Arc<RwLock<Vec<RankResult>>>,
-    db_path: Option<String>
+    db_path: Option<String>,
+    cache_path: Option<String>
 }
 
 impl UI {
-    pub fn new(visual_pack: VisualPack, db_path: Option<String>) -> Self {
+    pub fn new(visual_pack: VisualPack, db_path: Option<String>, cache_path: Option<String>) -> Self {
         let input_offset = (visual_pack.get_symbol(VisualPackChars::SearchBarLeft).chars().count()+1) as u16;
         let result_offset = (visual_pack.get_symbol(VisualPackChars::ResultLeft(RankSource::ExactPath, false)).chars().count()+2) as u16;
         Self {
@@ -46,12 +47,13 @@ impl UI {
             state: Arc::new(RwLock::new(UIState::None)),
             vp: visual_pack,
             results: Arc::new(RwLock::new(Vec::new())),
-            db_path
+            db_path,
+            cache_path
         }
     }
 
     pub fn default() -> Self {
-        Self::new(VisualPack::ExtendedUnicode, None)
+        Self::new(VisualPack::ExtendedUnicode, None, None)
     }
 
     pub async fn run(&mut self) -> Option<PathBuf> {
@@ -76,8 +78,9 @@ impl UI {
         let results = self.results.clone();
         let input = self.input.clone();
         let db_path = self.db_path.clone();
+        let cache_path = self.cache_path.clone();
         tokio::spawn(async move {
-            let mut ranker = Ranker::new(db_path).await;
+            let mut ranker = Ranker::new(db_path, cache_path).await;
             ranker.init();
             loop {
                 Self::rank(&results, &input, &mut ranker).await

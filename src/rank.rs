@@ -88,9 +88,9 @@ pub struct Ranker {
     last_input: String
 }
 impl Ranker {
-    pub async fn new(db_path: Option<String>) -> Self {
+    pub async fn new(db_path: Option<String>, cache_path: Option<String>) -> Self {
         Self {
-            embedder: Embedder::new(db_path).await,
+            embedder: Embedder::new(db_path, cache_path).await,
             last_input: String::new()
         }
     }

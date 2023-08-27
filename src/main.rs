@@ -4,6 +4,9 @@ mod ui;
 mod rank;
 mod build;
 mod embedding;
+use annoy_rs::AnnoyIndex;
+use annoy_rs::AnnoyIndexSearchApi;
+use embedding::Embedder;
 use error::Error;
 use error::Result;
 use ui::UI;
@@ -11,6 +14,17 @@ use ui::visual_pack::VisualPack;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let embedder = Embedder::new(None, None).await;
+    let annoy = AnnoyIndex::load(384, "cache.ann", annoy_rs::IndexType::Euclidean).unwrap();
+    println!("{}", annoy.size);
+    let result = annoy.get_nearest(embedder.embed(&["test"]).await[0].as_ref(), 18, 10, true);
+    println!("{:#?}", result.id_list);
+    println!("{:#?}", result.distance_list);
+    Ok(())
+}
+
+//#[tokio::main]
+async fn mainr() -> Result<()> {
     let mut cache_path = None;
     let mut db_path = None;
     let mut target_file = None;
@@ -21,7 +35,7 @@ async fn main() -> Result<()> {
         match arg.as_str() {
             "--cache-path" => {
                 if i + 1 < args.len() {
-                    cache_path = Some(args[i + 1].as_str());
+                    cache_path = Some(args[i + 1].clone());
                 } else {
                     return Err(Error::CliArgs("Bad args : --cache-path".to_string()))
                 }
@@ -102,7 +116,7 @@ async fn main() -> Result<()> {
                             return Err(Error::CliArgs("Bad args : --db-path is required".to_string()));
                         }
                     };
-                    build::build(target, level, cache_path, db_path).await;
+                    build::build(target, level, &cache_path, db_path).await;
                     return Ok(());
                 }
             }
@@ -110,7 +124,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut ui = UI::new(vp, db_path);
+    let mut ui = UI::new(vp, db_path, cache_path);
     let path = ui.run().await;
 
     if let Some(path) = path {

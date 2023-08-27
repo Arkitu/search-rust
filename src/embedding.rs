@@ -53,14 +53,14 @@ pub struct Embedder {
     tasks: Arc<RwLock<BinaryHeap<Task>>>
 }
 impl Embedder {
-    pub async fn new(db_path: Option<String>) -> Self {
+    pub async fn new(db_path: Option<String>, cache_path: Option<String>) -> Self {
         let model = spawn_blocking(move || {
             SentenceEmbeddingsBuilder::remote(AllMiniLmL12V2).create_model().unwrap()
         }).await.expect("Can't create model");
         Self {
             model: Arc::new(Mutex::new(model)),
             model_queue: Arc::new(Mutex::new(())),
-            cache: Arc::new(Mutex::new(Cache::new(db_path))),
+            cache: Arc::new(Mutex::new(Cache::new(db_path, cache_path))),
             tasks: Arc::new(RwLock::new(BinaryHeap::new()))
         }
     }
